@@ -143,6 +143,7 @@ async function startCrawl(config) {
     mode: config.renderJs ? 'rendered' : 'raw',
     contentFilter: config.contentFilter ?? DEFAULT_FILTER,
     filterOptions: config.query ? { query: config.query } : {},
+    extractionSchema: config.extractionSchema ?? null,
     scrapeOptions: {
       excludeExternalLinks: config.excludeExternalLinks ?? false,
       excludeSocialMediaLinks: config.excludeSocialMedia ?? false,

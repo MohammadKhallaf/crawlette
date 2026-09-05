@@ -16,6 +16,7 @@
 import { scrape } from '../scrape.js';
 import { generateMarkdown } from '../markdown.js';
 import { applyFilter, DEFAULT_FILTER } from '../filters/index.js';
+import { extractJsonCss } from '../extract/jsonCss.js';
 
 /** Page-load ceiling, mirroring crawl4ai's PAGE_TIMEOUT. */
 export const DEFAULT_TIMEOUT_MS = 60_000;
@@ -34,6 +35,7 @@ export function processHtml(html, url, options = {}) {
     contentFilter = DEFAULT_FILTER,
     filterOptions = {},
     scrapeOptions = {},
+    extractionSchema = null,
     citations = true,
     statusCode = 200,
     parser = (h) => new DOMParser().parseFromString(h, 'text/html'),
@@ -41,8 +43,17 @@ export function processHtml(html, url, options = {}) {
 
   const doc = parser(html);
 
-  // The filter needs the unpruned document, so it runs before scrape() mutates.
+  // Both run against the unpruned document, before scrape() mutates it.
   const fitHtml = applyFilter(doc, contentFilter, filterOptions);
+
+  let extracted = null;
+  if (extractionSchema) {
+    try {
+      extracted = extractJsonCss(doc, extractionSchema);
+    } catch (error) {
+      extracted = { error: String(error?.message ?? error) };
+    }
+  }
 
   const scraped = scrape(doc, url, scrapeOptions);
   const markdown = generateMarkdown(scraped.cleanedHtml, url, fitHtml, { citations });
@@ -57,6 +68,7 @@ export function processHtml(html, url, options = {}) {
     media: scraped.media,
     tables: scraped.tables,
     metadata: scraped.metadata,
+    extracted,
     wordCount: markdown.rawMarkdown ? markdown.rawMarkdown.split(/\s+/).filter(Boolean).length : 0,
   };
 }

@@ -135,3 +135,22 @@ test('rendered mode falls back to raw outside the extension runtime', async () =
     assert.equal(r.success, true, 'should fall back rather than fail');
   } finally { restore(); }
 });
+
+test('an extraction schema populates result.extracted', () => {
+  const r = processHtml(
+    '<html><body><div class="item"><h3>Alpha</h3></div><div class="item"><h3>Beta</h3></div></body></html>',
+    URL_,
+    { extractionSchema: { baseSelector: 'div.item', fields: [{ name: 'title', selector: 'h3', type: 'text' }] } },
+  );
+  assert.deepEqual(r.extracted, [{ title: 'Alpha' }, { title: 'Beta' }]);
+});
+
+test('extracted is null when no schema is given', () => {
+  assert.equal(processHtml(PAGE, URL_).extracted, null);
+});
+
+test('a broken schema is reported without failing the page', () => {
+  const r = processHtml(PAGE, URL_, { extractionSchema: { fields: [] } });
+  assert.equal(r.success, true);
+  assert.match(r.extracted.error, /baseSelector/);
+});
