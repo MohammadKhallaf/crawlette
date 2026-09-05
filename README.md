@@ -94,6 +94,27 @@ whose detail pages are server-rendered:
 
 Export the results as `.json` and the whole set is one file.
 
+### Record mode: when there is no sitemap, and no obvious selector
+
+Auto-detecting pagination means a heuristic per pattern -- infinite scroll,
+numbered pages, load-more, next arrows, filters, tabs -- and a synthetic click
+carries `isTrusted: false`, so anti-bot and paywall code can refuse it outright.
+The person at the keyboard has none of those problems.
+
+**Pick & record** turns that into the mechanism:
+
+1. Open the listing page and press **Pick & record**.
+2. Click one example of the thing you want. A selector is inferred from it, and
+   obvious fields (title, link, image, description) are suggested.
+3. Browse the site however it works -- scroll, paginate, filter. Matches are
+   collected as they appear, including on virtualised lists that recycle nodes.
+4. Press **Done**. The results open by themselves.
+5. Press **Crawl recorded links** to visit every page the recording found,
+   applying the schema it produced.
+
+That last step is the point: the listing supplies the URLs *and* the shape, and
+the crawl fills in each detail page. No sitemap, no hand-written selectors.
+
 ### Sizing output for an LLM
 
 Prefer a schema over markdown when the goal is feeding a model. For the 390

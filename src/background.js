@@ -148,7 +148,7 @@ async function startCrawl(config) {
   // Resolve the seed list. A sitemap seed matters for sites whose listing
   // pages are client-rendered: those expose no links to follow, so link
   // discovery finds nothing and only the sitemap has the full set of URLs.
-  let seeds = [config.url];
+  let seeds = config.seeds?.length ? config.seeds : [config.url];
   if (config.useSitemap) {
     try {
       // Both of these are discoverable, so neither should have to be typed:
@@ -288,6 +288,31 @@ async function resumeCrawl() {
   return { started: true, resumedFrom: previous.length };
 }
 
+/**
+ * Crawl every page a recording linked to, applying the schema it produced.
+ *
+ * This is what makes recording worth doing: the listing gives the URLs and the
+ * shape, and the crawl fills in each detail page. It needs no sitemap and no
+ * hand-written selectors -- the user pointed at one card and paginated.
+ */
+async function crawlRecorded(overrides = {}) {
+  const state = await nowState();
+  const urls = state?.recordedUrls ?? [];
+  if (!urls.length) throw new Error('That recording captured no links to follow');
+
+  return startCrawl({
+    ...(state.config ?? {}),
+    url: urls[0],
+    seeds: urls,
+    strategy: 'bfs',
+    maxDepth: 0,              // the recorded links are the work
+    maxPages: overrides.maxPages ?? urls.length,
+    contentFilter: overrides.contentFilter ?? 'none',
+    extractionSchema: overrides.schema ?? state.schema ?? null,
+    useSitemap: false,
+  });
+}
+
 /** Stop the running crawl, if any. */
 async function stopCrawl() {
   if (running) running.cancelled = true;
@@ -309,6 +334,7 @@ async function getStatus() {
     successful: results.filter((r) => r.success).length,
     // A 'running' state with no live handle means the worker was restarted.
     stale: Boolean(state?.status === 'running' && !running),
+    recordedUrls: state?.recordedUrls?.length ?? 0,
     resumable: Boolean(state?.frontier?.pending?.length
       || state?.frontier?.stack?.length || state?.frontier?.queue?.length),
   };
@@ -355,12 +381,20 @@ async function startRecording() {
     extracted: harvest.items,
     recordedSchema: harvest.schema,
   }]);
+  // A recording is only half the job. Keeping the links and the schema lets the
+  // next step crawl every detail page behind the listing, which is what turns
+  // "I collected some cards" into a full structured dataset.
+  const recordedUrls = [...new Set(
+    harvest.items.map((i) => i.link).filter(Boolean),
+  )];
+
   await setState({
     status: 'complete',
     recorded: true,
     startUrl: harvest.url,
     selector: harvest.selector,
     schema: harvest.schema,
+    recordedUrls,
     pagesCrawled: 1,
     finishedAt: Date.now(),
   });
@@ -369,13 +403,19 @@ async function startRecording() {
   // this. Open the results itself rather than leaving them wondering.
   await chrome.tabs.create({ url: chrome.runtime.getURL('src/ui/results.html') });
 
-  return { count: harvest.count, selector: harvest.selector, schema: harvest.schema };
+  return {
+    count: harvest.count,
+    selector: harvest.selector,
+    schema: harvest.schema,
+    urls: recordedUrls.length,
+  };
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const handlers = {
     start: () => startCrawl(message.config),
     resume: () => resumeCrawl(),
+    crawlRecorded: () => crawlRecorded(message.options ?? {}),
     record: () => startRecording(),
     stop: () => stopCrawl(),
     status: () => getStatus(),

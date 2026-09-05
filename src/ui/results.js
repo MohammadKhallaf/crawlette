@@ -153,7 +153,16 @@ function detailNodes(result) {
   }
 
   const body = result.markdown + (result.references ? `\n${result.references}` : '');
-  return text('pre', body || '(empty)');
+  if (!body.trim()) {
+    // A recording collects item fragments, not a page, so page markdown does
+    // not exist for it. Say so instead of showing an empty box.
+    const why = Array.isArray(result.extracted) && result.extracted.length
+      ? 'This row is a recording — see the Extracted tab. '
+        + 'To get markdown for each page, use "Crawl recorded links".'
+      : 'No markdown for this page.';
+    return text('p', why, 'empty');
+  }
+  return text('pre', body);
 }
 
 /** Pick the tab that actually has something in it for this result. */

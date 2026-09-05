@@ -405,3 +405,65 @@ test('resuming with nothing to continue is refused', async () => {
     assert.match(reply.error, /Nothing to resume/);
   } finally { restore(); }
 });
+
+/**
+ * The point of recording: a listing gives both the URLs and the shape, and the
+ * crawl then fills in every detail page. Without this the recording is an
+ * island that never improves crawl results.
+ */
+test('a recording seeds a crawl of its links, with its schema', async () => {
+  const { send, session } = installChrome();
+  const { origin, restore } = stubSite({
+    '/a': '<html><head><title>A</title></head><body>'
+      + '<div class="sp"><h2>Ada</h2><p>Engineer</p></div></body></html>',
+    '/b': '<html><head><title>B</title></head><body>'
+      + '<div class="sp"><h2>Bob</h2><p>Designer</p></div></body></html>',
+  });
+
+  try {
+    await import(`../src/background.js?case=recorded`);
+
+    // Stand in for a finished recording: two links and an inferred schema.
+    session.set('crawlState', {
+      status: 'complete',
+      recorded: true,
+      recordedUrls: [`${origin}/a`, `${origin}/b`],
+      schema: {
+        baseSelector: '.sp',
+        fields: [
+          { name: 'name', selector: 'h2', type: 'text' },
+          { name: 'role', selector: 'p', type: 'text' },
+        ],
+      },
+      config: {},
+    });
+
+    assert.equal((await send({ type: 'status' })).recordedUrls, 2);
+
+    const started = await send({ type: 'crawlRecorded' });
+    assert.equal(started.started, true);
+    await waitFor(async () => (await send({ type: 'status' })).state.status !== 'running', { label: 'crawl' });
+
+    const results = await send({ type: 'results' });
+    assert.equal(results.length, 2, 'both recorded links should be crawled');
+
+    // Every page extracted with the schema the recording produced.
+    const rows = results.flatMap((r) => r.extracted ?? []);
+    assert.deepEqual(
+      rows.map((x) => x.name).sort(),
+      ['Ada', 'Bob'],
+    );
+    assert.equal(rows.find((x) => x.name === 'Ada').role, 'Engineer');
+  } finally { restore(); }
+});
+
+test('crawling a recording that captured no links is refused', async () => {
+  const { send, session } = installChrome();
+  const { restore } = stubSite({});
+  try {
+    await import(`../src/background.js?case=nolinks`);
+    session.set('crawlState', { status: 'complete', recorded: true, recordedUrls: [] });
+    const reply = await send({ type: 'crawlRecorded' });
+    assert.match(reply.error, /no links/i);
+  } finally { restore(); }
+});

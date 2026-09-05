@@ -192,6 +192,11 @@ async function refresh() {
   }
 
   $('resume').hidden = isRunning || !status.resumable;
+  // A recording that captured links can be turned straight into a crawl.
+  const recorded = status.recordedUrls ?? 0;
+  const crawlRecorded = $('crawlRecorded');
+  crawlRecorded.hidden = isRunning || !recorded;
+  if (recorded) crawlRecorded.textContent = `Crawl ${recorded} recorded links`;
 
   if (!isRunning && pollTimer) {
     clearInterval(pollTimer);
@@ -246,6 +251,15 @@ $('resume').addEventListener('click', async () => {
   return undefined;
 });
 
+$('crawlRecorded').addEventListener('click', async () => {
+  setStatus('Crawling the pages that recording found…');
+  const response = await send({ type: 'crawlRecorded', options: {} });
+  if (response?.error) return setStatus(response.error, true);
+  setRunning(true);
+  startPolling();
+  return undefined;
+});
+
 $('record').addEventListener('click', async () => {
   setStatus('Click an example on the page…');
   // The popup closes as soon as the user clicks the page, which is expected:
@@ -253,7 +267,11 @@ $('record').addEventListener('click', async () => {
   const response = await send({ type: 'record' });
   if (response?.error) return setStatus(response.error, true);
   if (response?.cancelled) return setStatus('Recording cancelled.');
-  return setStatus([`Recorded `, strong(response.count), ' items.']);
+  await refresh();  // reveals the "Crawl N recorded links" button
+  return setStatus([
+    'Recorded ', strong(response.count), ' items',
+    response.urls ? ` — ${response.urls} have links you can crawl.` : '.',
+  ]);
 });
 
 $('view').addEventListener('click', () => {

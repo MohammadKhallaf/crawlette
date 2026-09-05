@@ -85,8 +85,19 @@ function collect() {
     if (el.closest(`#${HOST_ID}`)) continue;
     const key = itemKey(el);
     if (session.items.has(key)) continue;
+    // The item's own link matters as much as its text: a recorded listing
+    // becomes the seed list for a crawl of every detail page behind it.
+    const href = el.matches('a[href]')
+      ? el.getAttribute('href')
+      : el.querySelector('a[href]')?.getAttribute('href');
+    let link = null;
+    if (href) {
+      try { link = new URL(href, location.href).toString(); } catch { link = null; }
+    }
+
     session.items.set(key, {
       ...readFields(el),
+      ...(link ? { link } : {}),
       text: (el.textContent || '').replace(/\s+/g, ' ').trim(),
     });
     added += 1;
