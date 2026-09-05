@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Crawlette — browser crawler",
+  "version": "0.1.0",
+  "description": "Crawl sites to LLM-ready markdown and structured JSON, entirely in the browser. No server, no Python.",
+  "permissions": ["storage", "tabs", "offscreen", "downloads", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "src/background.js", "type": "module" },
+  "action": {
+    "default_popup": "src/ui/popup.html",
+    "default_title": "Crawlette"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "crawlette",
+  "version": "0.1.0",
+  "description": "Browser-native web crawler producing LLM-ready markdown and structured JSON. No server required.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "linkedom": "^0.18.11"
+  }
+}
