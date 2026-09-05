@@ -1,0 +1,154 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Crawlette</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --accent: #2563eb;
+    --accent-fg: #ffffff;
+    --danger: #dc2626;
+    --field: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e; --fg: #f5f5f7; --muted: #9ca3af; --border: #3a3a3c;
+      --accent: #3b82f6; --field: #2c2c2e;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    width: 340px; margin: 0; padding: 14px;
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--fg);
+  }
+  h1 { margin: 0 0 2px; font-size: 15px; }
+  .sub { margin: 0 0 12px; color: var(--muted); font-size: 11px; }
+
+  label { display: block; margin-bottom: 9px; }
+  .label-text { display: block; margin-bottom: 3px; font-weight: 500; font-size: 11px; }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: 6px 8px; font: inherit;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--field); color: var(--fg);
+  }
+  .row { display: flex; gap: 8px; }
+  .row > label { flex: 1; }
+
+  .check { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; font-size: 12px; }
+  .check input { margin: 0; }
+  .hint { color: var(--muted); font-size: 10px; margin-top: 2px; }
+
+  .actions { display: flex; gap: 8px; margin-top: 12px; }
+  button {
+    flex: 1; padding: 8px; font: inherit; font-weight: 500;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--field); color: var(--fg); cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+
+  #status {
+    margin-top: 10px; padding: 8px; border-radius: 6px;
+    background: var(--field); border: 1px solid var(--border);
+    font-size: 11px; display: none;
+  }
+  #status.show { display: block; }
+  #status .err { color: var(--danger); }
+
+  details { margin: 4px 0 0; }
+  summary { cursor: pointer; font-size: 11px; color: var(--muted); padding: 3px 0; }
+</style>
+</head>
+<body>
+  <h1>Crawlette</h1>
+  <p class="sub">Crawl to markdown, entirely in your browser.</p>
+
+  <label>
+    <span class="label-text">Start URL</span>
+    <input type="text" id="url" placeholder="https://example.com">
+  </label>
+
+  <div class="row">
+    <label>
+      <span class="label-text">Strategy</span>
+      <select id="strategy">
+        <option value="bfs">Breadth-first</option>
+        <option value="dfs">Depth-first</option>
+        <option value="best-first">Best-first</option>
+      </select>
+    </label>
+    <label>
+      <span class="label-text">Content</span>
+      <select id="contentFilter">
+        <option value="readability">Readability</option>
+        <option value="pruning-legacy">Pruning (crawl4ai)</option>
+        <option value="bm25">BM25 query</option>
+        <option value="none">None</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="row">
+    <label>
+      <span class="label-text">Max depth</span>
+      <input type="number" id="maxDepth" value="1" min="0" max="10">
+    </label>
+    <label>
+      <span class="label-text">Max pages</span>
+      <input type="number" id="maxPages" value="25" min="1" max="1000">
+    </label>
+  </div>
+
+  <label id="queryRow" hidden>
+    <span class="label-text">Query (for BM25)</span>
+    <input type="text" id="query" placeholder="topic keywords">
+  </label>
+
+  <label id="keywordsRow" hidden>
+    <span class="label-text">Keywords (best-first ranking)</span>
+    <input type="text" id="keywords" placeholder="docs, api, guide">
+  </label>
+
+  <div class="check">
+    <input type="checkbox" id="renderJs">
+    <label for="renderJs" style="margin:0">Render JavaScript</label>
+  </div>
+  <div class="hint" style="margin:-4px 0 8px 20px">Slower, but sees SPA content.</div>
+
+  <div class="check">
+    <input type="checkbox" id="includeExternal">
+    <label for="includeExternal" style="margin:0">Follow external links</label>
+  </div>
+
+  <details>
+    <summary>More options</summary>
+    <div class="check" style="margin-top:6px">
+      <input type="checkbox" id="excludeSocialMedia" checked>
+      <label for="excludeSocialMedia" style="margin:0">Skip social media</label>
+    </div>
+    <label>
+      <span class="label-text">CSS selector (limit content)</span>
+      <input type="text" id="cssSelector" placeholder="main, article">
+    </label>
+  </details>
+
+  <div class="actions">
+    <button id="start" class="primary">Start crawl</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
+  <div class="actions" style="margin-top:6px">
+    <button id="view">View results</button>
+  </div>
+
+  <div id="status"></div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

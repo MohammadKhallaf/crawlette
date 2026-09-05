@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Crawlette results</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --border: #e5e7eb;
+    --accent: #2563eb; --panel: #f9fafb; --danger: #dc2626; --ok: #16a34a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e; --fg: #f5f5f7; --muted: #9ca3af; --border: #3a3a3c;
+      --accent: #60a5fa; --panel: #2c2c2e;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: flex; flex-direction: column;
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--fg);
+  }
+
+  header {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 15px; }
+  .stats { color: var(--muted); font-size: 12px; }
+  .spacer { flex: 1; }
+  button {
+    padding: 6px 11px; font: inherit; font-size: 12px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--panel); color: var(--fg); cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+
+  main { flex: 1; display: flex; min-height: 0; }
+
+  #list { width: 42%; overflow: auto; border-right: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td {
+    text-align: left; padding: 7px 10px;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 0;
+  }
+  th { position: sticky; top: 0; background: var(--bg); cursor: pointer; font-weight: 600; }
+  th:hover { color: var(--accent); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--panel); }
+  tbody tr.active { background: var(--accent); color: #fff; }
+  td.num { text-align: right; width: 62px; }
+  .fail { color: var(--danger); }
+  .ok { color: var(--ok); }
+
+  #detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .tabs { display: flex; gap: 2px; padding: 8px 12px 0; border-bottom: 1px solid var(--border); }
+  .tabs button {
+    border: none; border-bottom: 2px solid transparent; border-radius: 0;
+    background: none; padding: 6px 11px;
+  }
+  .tabs button.active { border-bottom-color: var(--accent); color: var(--accent); font-weight: 600; }
+
+  #detailUrl { padding: 9px 14px 0; font-size: 11px; color: var(--muted); word-break: break-all; }
+  #content { flex: 1; overflow: auto; padding: 12px 14px; }
+  pre {
+    margin: 0; white-space: pre-wrap; word-wrap: break-word;
+    font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .empty { color: var(--muted); padding: 32px 14px; text-align: center; }
+  ul.links { margin: 0; padding-left: 18px; font-size: 12px; }
+  ul.links li { margin-bottom: 3px; word-break: break-all; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Crawlette</h1>
+    <span class="stats" id="stats">No results yet</span>
+    <span class="spacer"></span>
+    <button id="exportMd">Export .md</button>
+    <button id="exportJson">Export .json</button>
+    <button id="refresh">Refresh</button>
+    <button id="clear">Clear</button>
+  </header>
+
+  <main>
+    <div id="list">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort="url">URL</th>
+            <th data-sort="depth" class="num">Depth</th>
+            <th data-sort="wordCount" class="num">Words</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+
+    <div id="detail">
+      <div class="tabs">
+        <button data-tab="markdown" class="active">Markdown</button>
+        <button data-tab="fitMarkdown">Fit markdown</button>
+        <button data-tab="links">Links</button>
+        <button data-tab="media">Media</button>
+        <button data-tab="extracted">Extracted</button>
+      </div>
+      <div id="detailUrl"></div>
+      <div id="content"><p class="empty">Select a page to view its content.</p></div>
+    </div>
+  </main>
+
+  <script type="module" src="results.js"></script>
+</body>
+</html>
