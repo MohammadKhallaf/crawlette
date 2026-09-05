@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchSitemap, looksLikeSitemap, guessSitemapUrls } from '../src/core/crawl/sitemap.js';
+import {
+  fetchSitemap, looksLikeSitemap, guessSitemapUrls, isSameOriginSitemap,
+} from '../src/core/crawl/sitemap.js';
 
 /** Serve a map of url -> body over a stubbed fetch. */
 function stubFetch(routes) {
@@ -110,4 +112,62 @@ test('guesses conventional sitemap locations', () => {
   const guesses = guessSitemapUrls('https://s.test/some/page');
   assert.ok(guesses.includes('https://s.test/sitemap.xml'));
   assert.equal(guessSitemapUrls('not a url').length, 0);
+});
+
+/**
+ * A sitemap index is content the crawl target controls. Following its children
+ * to arbitrary hosts would let it aim credentialed requests at internal
+ * services -- SSRF driven by a remote document.
+ */
+test('a hostile sitemap index cannot reach other origins', async () => {
+  let fetched = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    fetched.push(url);
+    if (url === 'https://evil.test/sitemap.xml') {
+      return { ok: true, status: 200, text: async () => `<sitemapindex>
+        <sitemap><loc>http://localhost:8080/admin.xml</loc></sitemap>
+        <sitemap><loc>http://169.254.169.254/latest/meta-data.xml</loc></sitemap>
+        <sitemap><loc>https://intranet.corp/sitemap.xml</loc></sitemap>
+        <sitemap><loc>https://evil.test/ok.xml</loc></sitemap></sitemapindex>` };
+    }
+    if (url === 'https://evil.test/ok.xml') {
+      return { ok: true, status: 200, text: async () => urlset(['https://evil.test/page']) };
+    }
+    return { ok: true, status: 200, text: async () => urlset(['https://leaked.test/secret']) };
+  };
+
+  try {
+    const urls = await fetchSitemap('https://evil.test/sitemap.xml');
+
+    for (const bad of ['localhost', '169.254.169.254', 'intranet.corp']) {
+      assert.ok(
+        !fetched.some((u) => u.includes(bad)),
+        `must not fetch ${bad}; fetched ${JSON.stringify(fetched)}`,
+      );
+    }
+    assert.deepEqual(urls, ['https://evil.test/page']);
+  } finally { globalThis.fetch = original; }
+});
+
+test('same-origin children are still followed', async () => {
+  const restore = stubFetch({
+    'https://s.test/index.xml': `<sitemapindex>
+      <sitemap><loc>https://s.test/child.xml</loc></sitemap></sitemapindex>`,
+    'https://s.test/child.xml': urlset(['https://s.test/a']),
+  });
+  try {
+    assert.deepEqual(await fetchSitemap('https://s.test/index.xml'), ['https://s.test/a']);
+  } finally { restore(); }
+});
+
+test('isSameOriginSitemap rejects other origins, ports and schemes', () => {
+  const parent = 'https://s.test/sitemap.xml';
+  assert.equal(isSameOriginSitemap('https://s.test/child.xml', parent), true);
+  assert.equal(isSameOriginSitemap('https://other.test/child.xml', parent), false);
+  assert.equal(isSameOriginSitemap('http://s.test/child.xml', parent), false); // scheme differs
+  assert.equal(isSameOriginSitemap('https://s.test:8443/child.xml', parent), false); // port differs
+  assert.equal(isSameOriginSitemap('file:///etc/passwd', parent), false);
+  assert.equal(isSameOriginSitemap('javascript:alert(1)', parent), false);
+  assert.equal(isSameOriginSitemap('not a url', parent), false);
 });

@@ -7,6 +7,16 @@
  * which makes them both faster and far more complete than following links.
  *
  * Handles plain urlsets, sitemap indexes (recursively), and plain-text sitemaps.
+ *
+ * SECURITY: a sitemap index is attacker-controlled content. Its child <loc>
+ * entries are followed with the user's cookies, so an index that pointed at
+ * arbitrary hosts could steer credentialed requests at internal services
+ * (http://localhost:8080/admin, an intranet host) -- server-side request
+ * forgery driven from a document the crawl target controls. Children are
+ * therefore restricted to the parent sitemap's own origin, which is also what
+ * the sitemaps.org spec requires: a sitemap may only list URLs on its own host
+ * unless cross-submission has been verified. Credentials can then only ever
+ * reach the origin the user typed themselves.
  */
 
 const MAX_INDEX_DEPTH = 3;
@@ -48,6 +58,7 @@ export async function fetchSitemap(url, options = {}) {
     if (_depth >= MAX_INDEX_DEPTH) return [];
     for (const child of parseLocs(body)) {
       if (seen.size >= limit) break;
+      if (!isSameOriginSitemap(child, url)) continue; // see SECURITY note above
       try {
         const nested = await fetchSitemap(child, { ...options, _depth: _depth + 1 });
         for (const u of nested) {
@@ -70,6 +81,23 @@ export async function fetchSitemap(url, options = {}) {
   }
 
   return [...seen].slice(0, limit === Infinity ? undefined : limit);
+}
+
+/**
+ * True when `child` is an http(s) URL on the same origin as `parent`.
+ *
+ * Guards the recursive fetch in `fetchSitemap`: without it, a hostile sitemap
+ * index could name any host -- including `file:`, `http://localhost`, or an
+ * intranet address -- and have it fetched with the user's ambient credentials.
+ */
+export function isSameOriginSitemap(child, parent) {
+  try {
+    const c = new URL(child);
+    if (c.protocol !== 'http:' && c.protocol !== 'https:') return false;
+    return c.origin === new URL(parent).origin;
+  } catch {
+    return false;
+  }
 }
 
 /** Heuristic: does this URL look like a sitemap rather than a page? */
