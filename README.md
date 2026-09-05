@@ -43,7 +43,7 @@ Click the toolbar icon. The start URL defaults to your active tab.
 | **Max pages** | Hard cap on successful fetches |
 | **Render JavaScript** | Load each page in an offscreen frame so scripts run. Slower; needed for SPAs |
 | **Follow external links** | Leave the starting domain |
-| **Seed from sitemap** | Crawl every URL a sitemap lists, instead of following links |
+| **Seed from sitemap** | Crawl every URL a sitemap lists, instead of following links. Leave the URL box empty and it is found for you |
 | **Extraction schema** | JSON-CSS schema; results gain a structured `extracted` array |
 
 Results open in a full tab with per-page markdown, fit markdown, links, media, and `.md` / `.json` export.
@@ -56,19 +56,24 @@ page and finds nothing. Rendering the listing works but is slow, and infinite
 scroll or pagination can still hide most of the set.
 
 Sitemaps solve this properly: they are static XML, list every URL, and cost one
-request. Tick **Seed from sitemap**, give the sitemap URL, and optionally a
-regex to keep only the URLs you want.
+request. Tick **Seed from sitemap** and leave the boxes empty — the sitemap is
+read from `robots.txt` (falling back to the conventional paths), and the section
+filter is derived from the URL you started on, so starting at `/speakers` keeps
+only `/speakers/` pages. Fill the boxes only to override those guesses.
 
 A worked example — 390 conference speakers whose grid is client-rendered, but
 whose detail pages are server-rendered:
 
 - **Start URL** `https://unbound.hubspot.com/speakers`
-- **Seed from sitemap** ticked, URL `https://unbound.hubspot.com/__sitemap__/speakers.xml`
-- **Keep URLs matching** `/speakers/`
+- **Seed from sitemap** ticked, both boxes left empty
+
+  The extension reads `robots.txt`, finds `sitemap_index.xml`, follows it to
+  `__sitemap__/speakers.xml`, and filters to `/speakers/` — 396 URLs, nothing
+  typed. That path is not guessable, which is exactly why it is not asked for.
 - **Max depth** `0` (the seeds are the work; do not follow their links)
 - **Max pages** `400`
 - **Content** `None` (the schema is the output; markdown would be wasted work)
-- **Extraction schema**
+- **Extraction schema** — optional; leave empty to get markdown instead
 
 ```json
 {

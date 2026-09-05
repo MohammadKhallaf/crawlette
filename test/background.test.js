@@ -279,3 +279,53 @@ test('an extraction schema reaches the stored results', async () => {
     assert.deepEqual(results[0].extracted, [{ title: 'Alpha' }, { title: 'Beta' }]);
   } finally { restore(); }
 });
+
+test('a blank sitemap URL is discovered and filtered automatically', async () => {
+  const { send } = installChrome();
+  const { origin, restore } = stubSite({
+    '/items': page('Items'),
+    '/items/a': page('Item A'),
+    '/items/b': page('Item B'),
+    '/blog/x': page('Blog X'),
+    '/robots.txt': 'Sitemap: https://site.test/sitemap.xml\n',
+    '/sitemap.xml': `<urlset>
+      <url><loc>https://site.test/items/a</loc></url>
+      <url><loc>https://site.test/items/b</loc></url>
+      <url><loc>https://site.test/blog/x</loc></url></urlset>`,
+  });
+  try {
+    await import(`../src/background.js?case=autositemap`);
+    // No sitemapUrl and no sitemapMatch: the user only ticked the box.
+    await send({ type: 'start', config: {
+      url: `${origin}/items`, strategy: 'bfs', maxDepth: 0, maxPages: 50, useSitemap: true,
+    } });
+    await waitFor(async () => (await send({ type: 'status' })).state.status !== 'running', { label: 'crawl to finish' });
+
+    const status = await send({ type: 'status' });
+    assert.equal(status.state.sitemapUsed, `${origin}/sitemap.xml`);
+    assert.equal(status.state.sitemapFilter, '/items/');
+
+    const results = await send({ type: 'results' });
+    assert.deepEqual(results.map((r) => r.title).sort(), ['Item A', 'Item B']);
+  } finally { restore(); }
+});
+
+test('a derived filter that matches nothing falls back to the whole sitemap', async () => {
+  const { send } = installChrome();
+  const { origin, restore } = stubSite({
+    '/odd': page('Odd'),
+    '/a': page('A'),
+    '/sitemap.xml': '<urlset><url><loc>https://site.test/a</loc></url></urlset>',
+  });
+  try {
+    await import(`../src/background.js?case=autofallback`);
+    await send({ type: 'start', config: {
+      url: `${origin}/odd`, strategy: 'bfs', maxDepth: 0, maxPages: 50, useSitemap: true,
+    } });
+    await waitFor(async () => (await send({ type: 'status' })).state.status !== 'running', { label: 'crawl to finish' });
+
+    // "/odd/" matches nothing, so rather than fail we use every listed URL.
+    const results = await send({ type: 'results' });
+    assert.deepEqual(results.map((r) => r.title), ['A']);
+  } finally { restore(); }
+});

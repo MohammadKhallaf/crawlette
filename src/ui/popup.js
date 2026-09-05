@@ -164,14 +164,25 @@ async function refresh() {
   if (state.status === 'idle') {
     $('status').classList.remove('show');
   } else if (isRunning) {
-    setStatus(['Crawling… ', strong(successful), ` pages (${total} attempted)`]);
+    const seeds = state.seedCount ? ` of ${state.seedCount}` : '';
+    setStatus(['Crawling… ', strong(successful), `${seeds} pages`]);
   } else if (stale) {
     setStatus(`Interrupted at ${successful} pages — the browser paused the crawl.`, true);
   } else if (state.status === 'error') {
     setStatus(`Failed: ${state.lastError}`, true);
   } else {
     const label = state.status === 'cancelled' ? 'Stopped' : 'Done';
-    setStatus([`${label} — `, strong(successful), ' pages crawled.']);
+    const parts = [`${label} — `, strong(successful), ' pages crawled.'];
+    // Tell the user what was found for them, so the automatic choice is visible.
+    if (state.sitemapUsed) {
+      parts.push(document.createElement('br'));
+      const note = document.createElement('span');
+      note.style.color = 'var(--muted)';
+      note.textContent = `sitemap: ${state.sitemapUsed}`
+        + (state.sitemapFilter ? ` (filter ${state.sitemapFilter})` : '');
+      parts.push(note);
+    }
+    setStatus(parts);
   }
 
   if (!isRunning && pollTimer) {

@@ -11,7 +11,7 @@ import { makeFetcher } from './core/crawl/fetcher.js';
 import { FilterChain, DomainFilter, ContentTypeFilter, URLPatternFilter } from './core/crawl/urlFilters.js';
 import { KeywordRelevanceScorer, FreshnessScorer, PathDepthScorer, CompositeScorer } from './core/crawl/scorers.js';
 import { DEFAULT_FILTER } from './core/filters/index.js';
-import { fetchSitemap } from './core/crawl/sitemap.js';
+import { fetchSitemap, discoverSitemap, deriveMatchFromUrl } from './core/crawl/sitemap.js';
 
 const STATE_KEY = 'crawlState';
 const RESULTS_KEY = 'crawlResults';
@@ -148,12 +148,37 @@ async function startCrawl(config) {
   let seeds = [config.url];
   if (config.useSitemap) {
     try {
-      seeds = await fetchSitemap(config.sitemapUrl || config.url, {
+      // Both of these are discoverable, so neither should have to be typed:
+      // robots.txt advertises the sitemap, and the section being crawled is
+      // implied by the URL the user started from.
+      let sitemapUrl = config.sitemapUrl;
+      let discovered = false;
+      if (!sitemapUrl) {
+        sitemapUrl = await discoverSitemap(config.url);
+        discovered = true;
+        if (!sitemapUrl) throw new Error('No sitemap found -- enter one manually');
+      }
+
+      const matchSource = config.sitemapMatch || (discovered ? deriveMatchFromUrl(config.url) : null);
+
+      seeds = await fetchSitemap(sitemapUrl, {
         limit: config.maxPages ?? 50,
-        match: config.sitemapMatch ? new RegExp(config.sitemapMatch) : null,
+        match: matchSource ? new RegExp(matchSource) : null,
       });
+
+      // A derived filter is a guess; if it matched nothing, the sitemap is
+      // still useful unfiltered.
+      if (!seeds.length && matchSource && !config.sitemapMatch) {
+        seeds = await fetchSitemap(sitemapUrl, { limit: config.maxPages ?? 50 });
+      }
       if (!seeds.length) throw new Error('Sitemap listed no matching URLs');
-      await setState({ ...(await nowState()), seedCount: seeds.length });
+
+      await setState({
+        ...(await nowState()),
+        seedCount: seeds.length,
+        sitemapUsed: sitemapUrl,
+        sitemapFilter: matchSource ?? null,
+      });
     } catch (error) {
       await setState({ ...state, status: 'error', lastError: `Sitemap failed: ${error?.message ?? error}` });
       running = null;

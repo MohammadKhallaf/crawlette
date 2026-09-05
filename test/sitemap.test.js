@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   fetchSitemap, looksLikeSitemap, guessSitemapUrls, isSameOriginSitemap,
+  discoverSitemap, deriveMatchFromUrl,
 } from '../src/core/crawl/sitemap.js';
 
 /** Serve a map of url -> body over a stubbed fetch. */
@@ -170,4 +171,48 @@ test('isSameOriginSitemap rejects other origins, ports and schemes', () => {
   assert.equal(isSameOriginSitemap('file:///etc/passwd', parent), false);
   assert.equal(isSameOriginSitemap('javascript:alert(1)', parent), false);
   assert.equal(isSameOriginSitemap('not a url', parent), false);
+});
+
+test('discovers the sitemap advertised in robots.txt', async () => {
+  const restore = stubFetch({
+    'https://s.test/robots.txt': 'User-agent: *\nAllow: /\n\nSitemap: https://s.test/custom/deep.xml\n',
+    'https://s.test/custom/deep.xml': urlset(['https://s.test/a']),
+  });
+  try {
+    assert.equal(await discoverSitemap('https://s.test/speakers'), 'https://s.test/custom/deep.xml');
+  } finally { restore(); }
+});
+
+test('falls back to conventional sitemap paths', async () => {
+  const restore = stubFetch({
+    'https://s.test/sitemap.xml': urlset(['https://s.test/a']),
+  });
+  try {
+    assert.equal(await discoverSitemap('https://s.test/page'), 'https://s.test/sitemap.xml');
+  } finally { restore(); }
+});
+
+test('discovery ignores an off-origin robots.txt advertisement', async () => {
+  // robots.txt is remote content; it must not be able to aim us elsewhere.
+  const restore = stubFetch({
+    'https://s.test/robots.txt': 'Sitemap: http://localhost:8080/internal.xml\n',
+    'https://s.test/sitemap.xml': urlset(['https://s.test/a']),
+  });
+  try {
+    assert.equal(await discoverSitemap('https://s.test/page'), 'https://s.test/sitemap.xml');
+  } finally { restore(); }
+});
+
+test('discovery returns null when nothing responds', async () => {
+  const restore = stubFetch({});
+  try {
+    assert.equal(await discoverSitemap('https://s.test/page'), null);
+    assert.equal(await discoverSitemap('not a url'), null);
+  } finally { restore(); }
+});
+
+test('derives a section filter from the start URL', () => {
+  assert.equal(deriveMatchFromUrl('https://s.test/speakers'), '/speakers/');
+  assert.equal(deriveMatchFromUrl('https://s.test/speakers/adam'), '/speakers/');
+  assert.equal(deriveMatchFromUrl('https://s.test/'), null);
 });

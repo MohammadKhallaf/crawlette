@@ -148,21 +148,22 @@
     <div class="hint" style="margin:-4px 0 8px 20px">
       Crawls every URL a sitemap lists. Use this when a listing page builds its
       links in JavaScript, so there is nothing for a crawler to follow.
+      <strong>Leave the boxes below empty</strong> and the sitemap is found for you.
     </div>
 
     <div id="sitemapFields" hidden>
       <label>
-        <span class="label-text">Sitemap URL</span>
-        <input type="text" id="sitemapUrl" placeholder="https://site.com/sitemap.xml">
+        <span class="label-text">Sitemap URL — optional</span>
+        <input type="text" id="sitemapUrl" placeholder="auto-detect from robots.txt">
       </label>
       <label>
-        <span class="label-text">Keep URLs matching (optional regex)</span>
-        <input type="text" id="sitemapMatch" placeholder="/speakers/">
+        <span class="label-text">Keep URLs matching — optional regex</span>
+        <input type="text" id="sitemapMatch" placeholder="auto: from your start URL">
       </label>
     </div>
 
     <label>
-      <span class="label-text">Extraction schema (JSON, optional)</span>
+      <span class="label-text">Extraction schema — optional, leave empty for markdown</span>
       <textarea id="extractionSchema" rows="4" spellcheck="false"
         placeholder='{"baseSelector":".card","fields":[{"name":"title","selector":"h3","type":"text"}]}'></textarea>
     </label>
