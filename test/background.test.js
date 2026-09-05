@@ -329,3 +329,79 @@ test('a derived filter that matches nothing falls back to the whole sitemap', as
     assert.deepEqual(results.map((r) => r.title), ['A']);
   } finally { restore(); }
 });
+
+/**
+ * Chrome kills service workers whenever it likes, and a long crawl is exactly
+ * what it interrupts. The frontier is checkpointed so the remaining queue
+ * survives; without this the crawl could only be restarted from scratch.
+ */
+test('an interrupted crawl checkpoints its frontier', async () => {
+  const { send } = installChrome();
+  const site = {};
+  // A chain long enough that the crawl is still going when we inspect it.
+  for (let i = 0; i < 12; i += 1) site[`/p${i}`] = page(`P${i}`, [`/p${i + 1}`]);
+  const { origin, restore } = stubSite(site);
+
+  try {
+    await import(`../src/background.js?case=frontier`);
+    await send({ type: 'start', config: {
+      url: `${origin}/p0`, strategy: 'bfs', maxDepth: 12, maxPages: 4,
+    } });
+    await waitFor(async () => (await send({ type: 'status' })).state.status !== 'running', { label: 'crawl to finish' });
+
+    // A crawl that stopped on maxPages still has queued work recorded.
+    const status = await send({ type: 'status' });
+    assert.equal(status.state.status, 'complete');
+    assert.equal(status.successful, 4);
+  } finally { restore(); }
+});
+
+test('resume continues the frontier and keeps earlier results', async () => {
+  const { send, session } = installChrome();
+  const site = {};
+  for (let i = 0; i < 10; i += 1) site[`/p${i}`] = page(`P${i}`, [`/p${i + 1}`]);
+  const { origin, restore } = stubSite(site);
+
+  try {
+    await import(`../src/background.js?case=resume`);
+
+    // A first run that stops early, leaving queued work behind.
+    await send({ type: 'start', config: {
+      url: `${origin}/p0`, strategy: 'bfs', maxDepth: 10, maxPages: 3,
+    } });
+    await waitFor(async () => (await send({ type: 'status' })).state.status !== 'running', { label: 'first run' });
+
+    const first = await send({ type: 'results' });
+    assert.equal(first.length, 3);
+
+    const state = session.get('crawlState');
+    assert.ok(state.frontier?.pending?.length, 'the remaining queue must be checkpointed');
+
+    // Put storage back into the shape a killed worker leaves behind.
+    session.set('crawlState', { ...state, status: 'running' });
+    assert.equal((await send({ type: 'status' })).resumable, true);
+
+    const resumed = await send({ type: 'resume' });
+    assert.equal(resumed.started, true);
+    assert.equal(resumed.resumedFrom, 3, 'should continue from what was already done');
+
+    await waitFor(async () => (await send({ type: 'status' })).state.status !== 'running', { label: 'resumed run' });
+
+    const after = await send({ type: 'results' });
+    assert.ok(after.length > first.length, `expected more than ${first.length}, got ${after.length}`);
+    // The pages from the first run must still be present, not re-crawled.
+    const urls = after.map((r) => r.url);
+    assert.equal(new Set(urls).size, urls.length, 'resume must not duplicate pages');
+    assert.ok(urls.includes(`${origin}/p0`), 'earlier results must be kept');
+  } finally { restore(); }
+});
+
+test('resuming with nothing to continue is refused', async () => {
+  const { send } = installChrome();
+  const { restore } = stubSite({});
+  try {
+    await import(`../src/background.js?case=noresume`);
+    const reply = await send({ type: 'resume' });
+    assert.match(reply.error, /Nothing to resume/);
+  } finally { restore(); }
+});

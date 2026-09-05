@@ -127,7 +127,9 @@ async function startCrawl(config) {
     lastError: null,
   };
   await setState(state);
-  await setResults([]);
+  // A resumed crawl keeps what the interrupted run already collected.
+  const carried = config.carryResults ?? [];
+  await setResults(carried);
 
   running = { cancelled: false };
   const token = running;
@@ -199,15 +201,20 @@ async function startCrawl(config) {
     },
   });
 
-  const results = [];
+  const results = [...carried];
   let lastCheckpoint = 0;
+  let frontier = null;   // latest queue state, so a killed worker can continue
 
   const checkpoint = async (force = false) => {
     const due = force || Date.now() - lastCheckpoint > CHECKPOINT_INTERVAL_MS;
     if (!due) return;
     lastCheckpoint = Date.now();
     await setResults(results);
-    await setState({ ...(await nowState()), pagesCrawled: results.filter((r) => r.success).length });
+    await setState({
+      ...(await nowState()),
+      pagesCrawled: results.filter((r) => r.success).length,
+      frontier,
+    });
   };
 
   // Run detached: the popup may close, and the crawl must survive that.
@@ -221,6 +228,8 @@ async function startCrawl(config) {
         filterChain: buildFilterChain(config),
         scorer: buildScorer(config),
         shouldCancel: () => token.cancelled,
+        onState: (snapshot) => { frontier = snapshot; },
+        resumeState: config.resumeState ?? null,
       });
 
       for await (const result of stream) {
@@ -231,7 +240,17 @@ async function startCrawl(config) {
 
       await checkpoint(true);
       const final = await nowState();
-      await setState({ ...final, status: token.cancelled ? 'cancelled' : 'complete', finishedAt: Date.now() });
+      // Only discard the frontier when the crawl genuinely ran out of pages.
+      // Stopping on maxPages leaves real work queued, which is what makes
+      // "crawl 400, then continue for the next 400" possible.
+      const pending = frontier?.pending?.length || frontier?.stack?.length
+        || frontier?.queue?.length || 0;
+      await setState({
+        ...final,
+        status: token.cancelled ? 'cancelled' : 'complete',
+        finishedAt: Date.now(),
+        frontier: pending ? frontier : null,
+      });
     } catch (error) {
       await setResults(results);
       const final = await nowState();
@@ -242,6 +261,30 @@ async function startCrawl(config) {
   })();
 
   return { started: true };
+}
+
+/**
+ * Continue a crawl whose service worker was killed part-way.
+ *
+ * Chrome terminates workers whenever it likes, and a long crawl is exactly the
+ * thing it interrupts. The frontier is checkpointed as the crawl runs, so the
+ * remaining queue survives and the work already done is not repeated.
+ */
+async function resumeCrawl() {
+  const state = await nowState();
+  if (!state?.frontier) throw new Error('Nothing to resume');
+
+  const previous = await getResults();
+  const resumed = await startCrawl({
+    ...state.config,
+    // The page limit applies to each run, not to the crawl's whole lifetime:
+    // resuming means "another batch of up to maxPages", which is what makes a
+    // large site approachable in sittings rather than one enormous run.
+    resumeState: { ...state.frontier, pagesCrawled: 0 },
+    carryResults: previous,
+  });
+  if (!resumed.started) return resumed;
+  return { started: true, resumedFrom: previous.length };
 }
 
 /** Stop the running crawl, if any. */
@@ -265,6 +308,8 @@ async function getStatus() {
     successful: results.filter((r) => r.success).length,
     // A 'running' state with no live handle means the worker was restarted.
     stale: Boolean(state?.status === 'running' && !running),
+    resumable: Boolean(state?.frontier?.pending?.length
+      || state?.frontier?.stack?.length || state?.frontier?.queue?.length),
   };
 }
 
@@ -326,6 +371,7 @@ async function startRecording() {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const handlers = {
     start: () => startCrawl(message.config),
+    resume: () => resumeCrawl(),
     record: () => startRecording(),
     stop: () => stopCrawl(),
     status: () => getStatus(),

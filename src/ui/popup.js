@@ -167,12 +167,18 @@ async function refresh() {
     const seeds = state.seedCount ? ` of ${state.seedCount}` : '';
     setStatus(['Crawling… ', strong(successful), `${seeds} pages`]);
   } else if (stale) {
-    setStatus(`Interrupted at ${successful} pages — the browser paused the crawl.`, true);
+    setStatus([
+      'Interrupted at ', strong(successful),
+      status.resumable ? ' pages — press Continue to pick up where it stopped.'
+        : ' pages — the browser paused the crawl.',
+    ], !status.resumable);
   } else if (state.status === 'error') {
     setStatus(`Failed: ${state.lastError}`, true);
   } else {
     const label = state.status === 'cancelled' ? 'Stopped' : 'Done';
-    const parts = [`${label} — `, strong(successful), ' pages crawled.'];
+    // Reaching the page limit is not the end of the site; say so.
+    const tail = status.resumable ? ' pages — more remain, press Continue.' : ' pages crawled.';
+    const parts = [`${label} — `, strong(successful), tail];
     // Tell the user what was found for them, so the automatic choice is visible.
     if (state.sitemapUsed) {
       parts.push(document.createElement('br'));
@@ -184,6 +190,8 @@ async function refresh() {
     }
     setStatus(parts);
   }
+
+  $('resume').hidden = isRunning || !status.resumable;
 
   if (!isRunning && pollTimer) {
     clearInterval(pollTimer);
@@ -227,6 +235,15 @@ $('start').addEventListener('click', async () => {
 $('stop').addEventListener('click', async () => {
   await send({ type: 'stop' });
   await refresh();
+});
+
+$('resume').addEventListener('click', async () => {
+  setStatus('Continuing…');
+  const response = await send({ type: 'resume' });
+  if (response?.error) return setStatus(response.error, true);
+  setRunning(true);
+  startPolling();
+  return undefined;
 });
 
 $('record').addEventListener('click', async () => {

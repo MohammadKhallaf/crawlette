@@ -103,6 +103,10 @@ function normalizeOptions(options) {
     scorer: options.scorer ?? null,
     shouldCancel: options.shouldCancel ?? (() => false),
     onProgress: options.onProgress ?? (() => {}),
+    // Called with the frontier after each level/pop so the caller can
+    // checkpoint it. Without this a killed service worker loses the queue and
+    // the crawl cannot be continued, only restarted.
+    onState: options.onState ?? (() => {}),
     concurrency: Math.max(1, options.concurrency ?? 5),
     resumeState: options.resumeState ?? null,
   };
@@ -190,9 +194,13 @@ export async function* bfsCrawl(startUrl, fetchPage, options = {}) {
       pagesCrawled += 1;
       opts.onProgress({ pagesCrawled, queued: nextLevel.length, depth });
 
-      if (pagesCrawled >= opts.maxPages) continue;
       if (depth + 1 > opts.maxDepth) continue;
 
+      // Keep discovering even at the page limit. These URLs are not crawled --
+      // the guard at the top of the loop stops that -- but recording them is
+      // what lets a later run continue where this one stopped, instead of
+      // starting over.
+      const atLimit = pagesCrawled >= opts.maxPages;
       const remaining = opts.maxPages - pagesCrawled;
       const candidates = [];
 
@@ -209,8 +217,9 @@ export async function* bfsCrawl(startUrl, fetchPage, options = {}) {
         candidates.push({ url, score });
       }
 
-      // Over capacity: keep the best-scoring candidates.
-      if (candidates.length > remaining) {
+      // Over capacity: keep the best-scoring candidates. At the limit we keep
+      // them all, because they are the resume frontier rather than work.
+      if (!atLimit && candidates.length > remaining) {
         if (opts.scorer) candidates.sort((a, b) => b.score - a.score);
         candidates.length = Math.max(0, remaining);
       }
@@ -222,6 +231,13 @@ export async function* bfsCrawl(startUrl, fetchPage, options = {}) {
     }
 
     currentLevel = nextLevel;
+    opts.onState({
+      strategy: 'bfs',
+      visited: [...visited],
+      pending: currentLevel,
+      depths: [...depths],
+      pagesCrawled,
+    });
   }
 }
 
@@ -275,6 +291,10 @@ export async function* dfsCrawl(startUrl, fetchPage, options = {}) {
     }
     // Reversed so the first-discovered child is popped first.
     for (const child of children.reverse()) stack.push(child);
+
+    opts.onState({
+      strategy: 'dfs', visited: [...visited], stack, pagesCrawled,
+    });
   }
 }
 
@@ -357,6 +377,13 @@ export async function* bestFirstCrawl(startUrl, fetchPage, options = {}) {
         queue.push({ url, parentUrl: result.url, depth: item.depth + 1, score });
       }
     }
+
+    opts.onState({
+      strategy: 'best-first',
+      visited: [...visited],
+      queue: [...queue.heap],
+      pagesCrawled,
+    });
   }
 }
 
