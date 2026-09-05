@@ -12,6 +12,7 @@ import { FilterChain, DomainFilter, ContentTypeFilter, URLPatternFilter } from '
 import { KeywordRelevanceScorer, FreshnessScorer, PathDepthScorer, CompositeScorer } from './core/crawl/scorers.js';
 import { DEFAULT_FILTER } from './core/filters/index.js';
 import { fetchSitemap, discoverSitemap, deriveMatchFromUrl } from './core/crawl/sitemap.js';
+import { injectModule } from './core/crawl/injectModule.js';
 
 const STATE_KEY = 'crawlState';
 const RESULTS_KEY = 'crawlResults';
@@ -326,10 +327,9 @@ async function startRecording() {
   if (!tab?.id) throw new Error('No active tab');
   if (!/^https?:/.test(tab.url ?? '')) throw new Error('Open a web page first');
 
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    files: ['src/content/recorder.js'],
-  });
+  // As a module: the script uses import/export, which a classic injection
+  // cannot parse (see injectModule).
+  await injectModule(tab.id, 'src/content/recorder.js');
 
   const reply = await chrome.tabs.sendMessage(tab.id, { type: 'content:record' });
   if (reply?.error) throw new Error(reply.error);

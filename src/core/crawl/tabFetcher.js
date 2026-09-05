@@ -12,6 +12,8 @@
  * capability a detached crawler structurally cannot have.
  */
 
+import { injectModule } from './injectModule.js';
+
 /** How long to wait for a tab to finish loading before giving up. */
 const LOAD_TIMEOUT_MS = 45_000;
 
@@ -97,10 +99,7 @@ export async function harvestInTab(url, options = {}) {
 
     await waitForLoad(tabId);
 
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ['src/content/harvest.js'],
-    });
+    await injectModule(tabId, 'src/content/harvest.js');
 
     const harvest = await askTab(
       tabId,
@@ -135,10 +134,7 @@ export async function harvestCurrentTab(options = {}) {
   if (!tab?.id) throw new Error('No active tab');
   if (!/^https?:/.test(tab.url ?? '')) throw new Error('That tab is not a web page');
 
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    files: ['src/content/harvest.js'],
-  });
+  await injectModule(tab.id, 'src/content/harvest.js');
 
   return askTab(
     tab.id,
