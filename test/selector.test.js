@@ -187,3 +187,38 @@ test('a repeating list still wins over a single ancestor', () => {
   assert.equal(result.selector, 'div.card');
   assert.equal(result.count, 2);
 });
+
+/**
+ * Regression: taking the outermost repeating ancestor picked `div.row` on a
+ * real quotes page -- a wrapper holding several quotes -- so 8 of every 10
+ * items were lost. Expansion must stop when the match count changes.
+ */
+test('expands to the item, not the group that contains several items', () => {
+  const doc = parseDoc(`<html><body>
+    <div class="row">
+      <div class="quote"><span class="text">One</span></div>
+      <div class="quote"><span class="text">Two</span></div>
+      <div class="quote"><span class="text">Three</span></div>
+    </div>
+    <div class="row">
+      <div class="quote"><span class="text">Four</span></div>
+      <div class="quote"><span class="text">Five</span></div>
+      <div class="quote"><span class="text">Six</span></div>
+    </div></body></html>`);
+
+  const result = inferSelector(doc.querySelector('.text'), doc);
+  assert.equal(result.selector, 'div.quote');
+  assert.equal(result.count, 6, 'must capture every quote, not the two rows');
+});
+
+test('expands through wrappers that share the item count', () => {
+  // span.label and div.card both match 3, so the bigger one wins.
+  const doc = parseDoc(`<html><body>
+    <div class="card"><span class="label">A</span></div>
+    <div class="card"><span class="label">B</span></div>
+    <div class="card"><span class="label">C</span></div>
+    </body></html>`);
+  const result = inferSelector(doc.querySelector('.label'), doc);
+  assert.equal(result.selector, 'div.card');
+  assert.equal(result.count, 3);
+});

@@ -93,9 +93,15 @@ function countMatches(root, selector) {
  * Find the element the user probably meant.
  *
  * A click lands on whatever is under the cursor -- usually a heading or a span
- * deep inside a card. What they want is the repeating card, so walk up until
- * the ancestor has siblings that look like it, and stop before we swallow the
- * whole list.
+ * deep inside a card -- but they mean the card, because that is what holds all
+ * the fields.
+ *
+ * The rule: walk outward while the match count stays the SAME, and stop when it
+ * changes. That yields the largest element still corresponding one-to-one with
+ * the thing clicked. On a quotes page, `span.text` (10) and `div.quote` (10)
+ * share a count so we expand to the quote, but `div.row` (2) groups several
+ * quotes together, so we stop before it. Taking the outermost match instead
+ * returned `div.row` and lost 8 of every 10 items.
  */
 export function findRepeatingContainer(el, root = el.ownerDocument) {
   let best = null;
@@ -106,8 +112,16 @@ export function findRepeatingContainer(el, root = el.ownerDocument) {
     if (classes.length) {
       const selector = `${node.tagName.toLowerCase()}.${esc(classes[0])}`;
       const count = countMatches(root, selector);
-      // 2+ matches means it repeats; a huge count means we hit a generic wrapper.
-      if (count >= 2 && count <= 2000) best = { node, selector, count };
+
+      if (count >= 2 && count <= 5000) {
+        if (!best) {
+          best = { node, selector, count };
+        } else if (count === best.count) {
+          best = { node, selector, count }; // same set, bigger element: prefer it
+        } else {
+          break;                            // a different grouping: stop here
+        }
+      }
     }
     node = node.parentElement;
   }

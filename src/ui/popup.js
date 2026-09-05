@@ -229,6 +229,16 @@ $('stop').addEventListener('click', async () => {
   await refresh();
 });
 
+$('record').addEventListener('click', async () => {
+  setStatus('Click an example on the page…');
+  // The popup closes as soon as the user clicks the page, which is expected:
+  // the content script owns the session from here and stores the result.
+  const response = await send({ type: 'record' });
+  if (response?.error) return setStatus(response.error, true);
+  if (response?.cancelled) return setStatus('Recording cancelled.');
+  return setStatus([`Recorded `, strong(response.count), ' items.']);
+});
+
 $('view').addEventListener('click', () => {
   chrome.tabs.create({ url: chrome.runtime.getURL('src/ui/results.html') });
 });

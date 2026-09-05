@@ -268,9 +268,65 @@ async function getStatus() {
   };
 }
 
+/**
+ * Start record mode in the tab the user is looking at.
+ *
+ * They pick an example, then browse the site however it works -- scrolling,
+ * paginating, filtering -- while matches are collected. This sidesteps
+ * pagination detection entirely: the person already knows how the site works,
+ * and every gesture they make is a real one that no anti-bot check will refuse.
+ */
+async function startRecording() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) throw new Error('No active tab');
+  if (!/^https?:/.test(tab.url ?? '')) throw new Error('Open a web page first');
+
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    files: ['src/content/recorder.js'],
+  });
+
+  const reply = await chrome.tabs.sendMessage(tab.id, { type: 'content:record' });
+  if (reply?.error) throw new Error(reply.error);
+
+  const harvest = reply.result;
+  if (harvest.cancelled) return { cancelled: true, count: 0 };
+
+  // Store the recording as a single result so the existing UI can show it.
+  await setResults([{
+    url: harvest.url,
+    success: true,
+    title: `Recorded ${harvest.count} items`,
+    depth: 0,
+    parentUrl: null,
+    wordCount: 0,
+    markdown: '',
+    markdownWithCitations: '',
+    references: '',
+    fitMarkdown: '',
+    links: { internal: [], external: [] },
+    media: { images: [], videos: [], audios: [] },
+    tables: [],
+    extracted: harvest.items,
+    recordedSchema: harvest.schema,
+  }]);
+  await setState({
+    status: 'complete',
+    recorded: true,
+    startUrl: harvest.url,
+    selector: harvest.selector,
+    schema: harvest.schema,
+    pagesCrawled: 1,
+    finishedAt: Date.now(),
+  });
+
+  return { count: harvest.count, selector: harvest.selector, schema: harvest.schema };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const handlers = {
     start: () => startCrawl(message.config),
+    record: () => startRecording(),
     stop: () => stopCrawl(),
     status: () => getStatus(),
     results: () => getResults(),

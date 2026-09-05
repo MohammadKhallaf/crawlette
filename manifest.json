@@ -25,7 +25,9 @@
     {
       "resources": [
         "src/ui/results.html",
-        "src/content/harvest.js"
+        "src/content/harvest.js",
+        "src/content/recorder.js",
+        "src/content/selector.js"
       ],
       "matches": [
         "<all_urls>"
