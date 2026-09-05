@@ -268,10 +268,23 @@ $('record').addEventListener('click', async () => {
   if (response?.error) return setStatus(response.error, true);
   if (response?.cancelled) return setStatus('Recording cancelled.');
   await refresh();  // reveals the "Crawl N recorded links" button
-  return setStatus([
+
+  const parts = [
     'Recorded ', strong(response.count), ' items',
     response.urls ? ` — ${response.urls} have links you can crawl.` : '.',
-  ]);
+  ];
+
+  // A data endpoint seen during pagination is usually the better route: one
+  // call with a raised limit can replace scraping every card.
+  if (response.bestApi) {
+    parts.push(document.createElement('br'));
+    const api = document.createElement('span');
+    api.style.color = 'var(--muted)';
+    api.textContent = `API seen: ${response.bestApi.itemCount} items from `
+      + `${response.bestApi.url.slice(0, 60)} — see Results for the full list.`;
+    parts.push(api);
+  }
+  return setStatus(parts);
 });
 
 $('view').addEventListener('click', () => {

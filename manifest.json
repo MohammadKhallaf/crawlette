@@ -27,7 +27,8 @@
         "src/ui/results.html",
         "src/content/harvest.js",
         "src/content/recorder.js",
-        "src/content/selector.js"
+        "src/content/selector.js",
+        "src/content/network.js"
       ],
       "matches": [
         "<all_urls>"

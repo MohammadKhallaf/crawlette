@@ -335,6 +335,7 @@ async function getStatus() {
     // A 'running' state with no live handle means the worker was restarted.
     stale: Boolean(state?.status === 'running' && !running),
     recordedUrls: state?.recordedUrls?.length ?? 0,
+    apiCalls: state?.apiCalls ?? [],
     resumable: Boolean(state?.frontier?.pending?.length
       || state?.frontier?.stack?.length || state?.frontier?.queue?.length),
   };
@@ -353,6 +354,17 @@ async function startRecording() {
   if (!tab?.id) throw new Error('No active tab');
   if (!/^https?:/.test(tab.url ?? '')) throw new Error('Open a web page first');
 
+  // Patch fetch/XHR in the PAGE's world first, so anything the site requests
+  // while the user paginates is captured. A listing's next-page call is often
+  // worth more than the cards it renders.
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      files: ['src/content/network.js'],
+    });
+  } catch { /* capture is a bonus; recording still works without it */ }
+
   // As a module: the script uses import/export, which a classic injection
   // cannot parse (see injectModule).
   await injectModule(tab.id, 'src/content/recorder.js');
@@ -362,6 +374,22 @@ async function startRecording() {
 
   const harvest = reply.result;
   if (harvest.cancelled) return { cancelled: true, count: 0 };
+
+  // Read back whatever the page asked for during the session.
+  let apiCalls = [];
+  try {
+    const [probe] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: () => (window.__crawletteNet?.calls ?? []),
+    });
+    // Keep the endpoints that actually carried a list, biggest first: those are
+    // the ones worth calling directly instead of scraping.
+    apiCalls = (probe?.result ?? [])
+      .filter((c) => c.itemCount >= 2)
+      .sort((a, b) => b.itemCount - a.itemCount)
+      .slice(0, 10);
+  } catch { /* no capture available */ }
 
   // Store the recording as a single result so the existing UI can show it.
   await setResults([{
@@ -395,6 +423,7 @@ async function startRecording() {
     selector: harvest.selector,
     schema: harvest.schema,
     recordedUrls,
+    apiCalls,
     pagesCrawled: 1,
     finishedAt: Date.now(),
   });
@@ -408,6 +437,8 @@ async function startRecording() {
     selector: harvest.selector,
     schema: harvest.schema,
     urls: recordedUrls.length,
+    apiCalls: apiCalls.length,
+    bestApi: apiCalls[0] ?? null,
   };
 }
 

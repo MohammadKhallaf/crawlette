@@ -11,6 +11,7 @@ const $ = (id) => document.getElementById(id);
 const send = (message) => chrome.runtime.sendMessage(message);
 
 let results = [];
+let apiCalls = [];
 let selected = null;
 let activeTab = 'markdown';
 let sortKey = null;
@@ -115,6 +116,34 @@ function detailNodes(result) {
     return ul;
   }
 
+  if (activeTab === 'api') {
+    if (!apiCalls.length) {
+      return text('p',
+        'No data endpoints were seen. Requests are captured during Pick & record, '
+        + 'so paginate while recording to catch the call that loads each page.',
+        'empty');
+    }
+    const wrap = document.createElement('div');
+    wrap.append(text('p',
+      'Requests the page made while you were recording, largest list first. '
+      + 'Calling one of these directly is usually faster and more complete than scraping.',
+      'empty'));
+
+    for (const call of apiCalls) {
+      const box = document.createElement('div');
+      box.style.cssText = 'margin-bottom:14px;padding:10px;border:1px solid var(--border);border-radius:8px';
+      box.append(text('div', `${call.itemCount} items${call.itemKey ? ` under "${call.itemKey}"` : ''}`));
+      const u = text('div', `${call.method} ${call.url}`);
+      u.style.cssText = 'font:11px ui-monospace,monospace;word-break:break-all;opacity:.8;margin:4px 0';
+      box.append(u);
+      const pre = text('pre', call.sample);
+      pre.style.cssText = 'font-size:11px;opacity:.7;max-height:120px;overflow:auto';
+      box.append(pre);
+      wrap.append(box);
+    }
+    return wrap;
+  }
+
   if (activeTab === 'extracted') {
     const rows = result.extracted;
     if (!rows || (Array.isArray(rows) && !rows.length)) {
@@ -212,6 +241,7 @@ async function load() {
   // Keep the selection across refreshes when the page is still present.
   if (selected) selected = results.find((r) => r.url === selected.url) ?? null;
 
+  apiCalls = status?.apiCalls ?? [];
   renderStats(status ?? {});
   renderList();
   renderDetail();
