@@ -129,6 +129,19 @@ async function* mapConcurrent(items, limit, fn) {
 }
 
 /**
+ * Accept either a single URL or a list of seeds.
+ *
+ * Seeding many URLs at once is how a sitemap-driven crawl works: listing pages
+ * are often client-rendered and expose no links to follow, so the seeds ARE the
+ * work rather than a starting point for discovery.
+ */
+function toSeeds(startUrl) {
+  const seeds = (Array.isArray(startUrl) ? startUrl : [startUrl]).filter(Boolean);
+  if (!seeds.length) throw new Error('A crawl needs at least one start URL');
+  return seeds;
+}
+
+/**
  * Breadth-first: fetch an entire level concurrently, then descend.
  *
  * `visited` is marked at discovery time, matching upstream, so a URL is never
@@ -136,11 +149,12 @@ async function* mapConcurrent(items, limit, fn) {
  */
 export async function* bfsCrawl(startUrl, fetchPage, options = {}) {
   const opts = normalizeOptions(options);
-  const baseDomain = getBaseDomain(startUrl);
+  const seeds = toSeeds(startUrl);
+  const baseDomain = getBaseDomain(seeds[0]);
 
   const visited = new Set(opts.resumeState?.visited ?? []);
-  const depths = new Map(opts.resumeState?.depths ?? [[startUrl, 0]]);
-  let currentLevel = opts.resumeState?.pending ?? [{ url: startUrl, parentUrl: null }];
+  const depths = new Map(opts.resumeState?.depths ?? seeds.map((u) => [u, 0]));
+  let currentLevel = opts.resumeState?.pending ?? seeds.map((u) => ({ url: u, parentUrl: null }));
   let pagesCrawled = opts.resumeState?.pagesCrawled ?? 0;
 
   // DIVERGENCE FROM crawl4ai (bug fix): upstream's batch BFS seeds `visited`
@@ -214,10 +228,13 @@ export async function* bfsCrawl(startUrl, fetchPage, options = {}) {
 /** Depth-first: one URL at a time, children pushed in reverse so order holds. */
 export async function* dfsCrawl(startUrl, fetchPage, options = {}) {
   const opts = normalizeOptions(options);
-  const baseDomain = getBaseDomain(startUrl);
+  const seeds = toSeeds(startUrl);
+  const baseDomain = getBaseDomain(seeds[0]);
 
   const visited = new Set(opts.resumeState?.visited ?? []);
-  const stack = opts.resumeState?.stack ?? [{ url: startUrl, parentUrl: null, depth: 0 }];
+  // Reversed so the first seed is popped first.
+  const stack = opts.resumeState?.stack
+    ?? [...seeds].reverse().map((u) => ({ url: u, parentUrl: null, depth: 0 }));
   let pagesCrawled = opts.resumeState?.pagesCrawled ?? 0;
 
   while (stack.length) {
@@ -270,7 +287,8 @@ export async function* dfsCrawl(startUrl, fetchPage, options = {}) {
  */
 export async function* bestFirstCrawl(startUrl, fetchPage, options = {}) {
   const opts = normalizeOptions(options);
-  const baseDomain = getBaseDomain(startUrl);
+  const seeds = toSeeds(startUrl);
+  const baseDomain = getBaseDomain(seeds[0]);
   const BATCH_SIZE = 10;
 
   const visited = new Set(opts.resumeState?.visited ?? []);
@@ -278,7 +296,9 @@ export async function* bestFirstCrawl(startUrl, fetchPage, options = {}) {
   let pagesCrawled = opts.resumeState?.pagesCrawled ?? 0;
 
   for (const item of opts.resumeState?.queue
-    ?? [{ url: startUrl, parentUrl: null, depth: 0, score: opts.scorer ? opts.scorer.score(startUrl) : 0 }]) {
+    ?? seeds.map((u) => ({
+      url: u, parentUrl: null, depth: 0, score: opts.scorer ? opts.scorer.score(u) : 0,
+    }))) {
     queue.push(item);
   }
 

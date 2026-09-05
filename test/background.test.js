@@ -193,3 +193,89 @@ test('a failing start URL is reported rather than silently empty', async () => {
     assert.ok(results[0].error, 'a failed page must carry an error for the UI to show');
   } finally { restore(); }
 });
+
+test('sitemap seeding crawls every listed URL', async () => {
+  const { send } = installChrome();
+  const { origin, restore } = stubSite({
+    // The listing page has NO links, exactly like a client-rendered grid.
+    '/items': page('Items'),
+    '/items/a': page('Item A'),
+    '/items/b': page('Item B'),
+    '/items/c': page('Item C'),
+    '/sitemap.xml': `<urlset>
+      <url><loc>${'https://site.test'}/items/a</loc></url>
+      <url><loc>${'https://site.test'}/items/b</loc></url>
+      <url><loc>${'https://site.test'}/items/c</loc></url></urlset>`,
+  });
+  try {
+    await import(`../src/background.js?case=sitemap`);
+    await send({ type: 'start', config: {
+      url: `${origin}/items`, strategy: 'bfs', maxDepth: 0, maxPages: 50,
+      useSitemap: true, sitemapUrl: `${origin}/sitemap.xml`,
+    } });
+    await waitFor(async () => (await send({ type: 'status' })).state.status !== 'running', { label: 'crawl to finish' });
+
+    const results = await send({ type: 'results' });
+    const titles = results.map((r) => r.title).sort();
+    assert.deepEqual(titles, ['Item A', 'Item B', 'Item C']);
+    // Crawling the listing page alone would have found nothing to follow.
+    assert.ok(!results.some((r) => r.title === 'Items'));
+  } finally { restore(); }
+});
+
+test('a sitemap regex filter is honoured', async () => {
+  const { send } = installChrome();
+  const { origin, restore } = stubSite({
+    '/items/a': page('Item A'),
+    '/blog/b': page('Blog B'),
+    '/sitemap.xml': `<urlset>
+      <url><loc>https://site.test/items/a</loc></url>
+      <url><loc>https://site.test/blog/b</loc></url></urlset>`,
+  });
+  try {
+    await import(`../src/background.js?case=sitemapfilter`);
+    await send({ type: 'start', config: {
+      url: `${origin}/`, strategy: 'bfs', maxDepth: 0, maxPages: 50,
+      useSitemap: true, sitemapUrl: `${origin}/sitemap.xml`, sitemapMatch: '/items/',
+    } });
+    await waitFor(async () => (await send({ type: 'status' })).state.status !== 'running', { label: 'crawl to finish' });
+
+    const results = await send({ type: 'results' });
+    assert.deepEqual(results.map((r) => r.title), ['Item A']);
+  } finally { restore(); }
+});
+
+test('an unreachable sitemap fails loudly instead of crawling nothing', async () => {
+  const { send } = installChrome();
+  const { origin, restore } = stubSite({ '/': page('Home') });
+  try {
+    await import(`../src/background.js?case=sitemapfail`);
+    const started = await send({ type: 'start', config: {
+      url: `${origin}/`, strategy: 'bfs', maxDepth: 0, maxPages: 5,
+      useSitemap: true, sitemapUrl: `${origin}/missing.xml`,
+    } });
+    assert.equal(started.started, false);
+    const status = await send({ type: 'status' });
+    assert.equal(status.state.status, 'error');
+    assert.match(status.state.lastError, /Sitemap failed/);
+  } finally { restore(); }
+});
+
+test('an extraction schema reaches the stored results', async () => {
+  const { send } = installChrome();
+  const { origin, restore } = stubSite({
+    '/': '<html><head><title>Cards</title></head><body>'
+      + '<div class="card"><h3>Alpha</h3></div><div class="card"><h3>Beta</h3></div></body></html>',
+  });
+  try {
+    await import(`../src/background.js?case=schema`);
+    await send({ type: 'start', config: {
+      url: `${origin}/`, strategy: 'bfs', maxDepth: 0, maxPages: 5,
+      extractionSchema: { baseSelector: '.card', fields: [{ name: 'title', selector: 'h3', type: 'text' }] },
+    } });
+    await waitFor(async () => (await send({ type: 'status' })).state.status !== 'running', { label: 'crawl to finish' });
+
+    const results = await send({ type: 'results' });
+    assert.deepEqual(results[0].extracted, [{ title: 'Alpha' }, { title: 'Beta' }]);
+  } finally { restore(); }
+});

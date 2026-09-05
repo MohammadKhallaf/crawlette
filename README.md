@@ -43,8 +43,60 @@ Click the toolbar icon. The start URL defaults to your active tab.
 | **Max pages** | Hard cap on successful fetches |
 | **Render JavaScript** | Load each page in an offscreen frame so scripts run. Slower; needed for SPAs |
 | **Follow external links** | Leave the starting domain |
+| **Seed from sitemap** | Crawl every URL a sitemap lists, instead of following links |
+| **Extraction schema** | JSON-CSS schema; results gain a structured `extracted` array |
 
 Results open in a full tab with per-page markdown, fit markdown, links, media, and `.md` / `.json` export.
+
+### Crawling a site whose listing page is client-rendered
+
+Modern sites often build their listing pages in JavaScript. Fetch such a page
+and the HTML contains **no links to follow**, so an ordinary crawl returns one
+page and finds nothing. Rendering the listing works but is slow, and infinite
+scroll or pagination can still hide most of the set.
+
+Sitemaps solve this properly: they are static XML, list every URL, and cost one
+request. Tick **Seed from sitemap**, give the sitemap URL, and optionally a
+regex to keep only the URLs you want.
+
+A worked example — 390 conference speakers whose grid is client-rendered, but
+whose detail pages are server-rendered:
+
+- **Start URL** `https://unbound.hubspot.com/speakers`
+- **Seed from sitemap** ticked, URL `https://unbound.hubspot.com/__sitemap__/speakers.xml`
+- **Keep URLs matching** `/speakers/`
+- **Max depth** `0` (the seeds are the work; do not follow their links)
+- **Max pages** `400`
+- **Content** `None` (the schema is the output; markdown would be wasted work)
+- **Extraction schema**
+
+```json
+{
+  "baseSelector": ".speaker-detail",
+  "fields": [
+    { "name": "name",     "selector": ".speaker-hero h2", "type": "text" },
+    { "name": "role",     "selector": ".speaker-hero p",  "type": "text" },
+    { "name": "linkedin", "selector": ".speaker-hero a[href*='linkedin.com/in']",
+      "type": "attribute", "attribute": "href", "default": "" },
+    { "name": "sessions", "selector": "a[href*='/sessions/']", "type": "nested_list",
+      "fields": [
+        { "name": "title", "selector": "h3", "type": "text" },
+        { "name": "url",   "type": "attribute", "attribute": "href" }
+      ] }
+  ]
+}
+```
+
+Export the results as `.json` and the whole set is one file.
+
+### Sizing output for an LLM
+
+Prefer a schema over markdown when the goal is feeding a model. For the 390
+speakers above, structured JSON came to roughly **54k tokens** — small enough to
+paste whole. The same pages as markdown are around ten times larger, and mixing
+390 people's prose invites the model to attribute the wrong role to the wrong
+person. Extract the fields you need, and the model reasons over facts rather
+than re-parsing page furniture.
 
 ## Architecture
 
@@ -60,9 +112,10 @@ src/
       strategies.js    BFS / DFS / best-first as async generators
       urlFilters.js    pattern, domain, content-type, depth filters
       scorers.js       keyword, path-depth, freshness, composite
+      sitemap.js       sitemap seeding (urlsets, indexes, plain text)
       fetcher.js       raw fetch or offscreen render, then the pipeline
   background.js        service worker: owns crawl state, checkpoints it
-  offscreen.js         renders pages so their JavaScript runs
+  offscreen.js         owns the only DOM: parses HTML and renders pages
   ui/                  popup and results view
 ```
 
@@ -117,7 +170,7 @@ Turndown + the GFM plugin replace crawl4ai's vendored `html2text`. Whitespace wi
 
 ```bash
 npm install     # linkedom, a dev-only DOM for tests
-npm test        # 103 tests, no framework beyond node --test
+npm test        # 146 tests, no framework beyond node --test
 ```
 
 Tests run under Node using [linkedom](https://github.com/WebReflection/linkedom) as a stand-in for the browser DOM; the extension itself ships no test dependencies.

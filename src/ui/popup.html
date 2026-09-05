@@ -33,11 +33,14 @@
 
   label { display: block; margin-bottom: 9px; }
   .label-text { display: block; margin-bottom: 3px; font-weight: 500; font-size: 11px; }
-  input[type=text], input[type=number], select {
+  input[type=text], input[type=number], select, textarea {
     width: 100%; padding: 6px 8px; font: inherit;
     border: 1px solid var(--border); border-radius: 6px;
     background: var(--field); color: var(--fg);
   }
+  textarea { font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+  .hint.bad { color: var(--danger); }
+  .hint.good { color: #16a34a; }
   .row { display: flex; gap: 8px; }
   .row > label { flex: 1; }
 
@@ -137,6 +140,33 @@
       <span class="label-text">CSS selector (limit content)</span>
       <input type="text" id="cssSelector" placeholder="main, article">
     </label>
+
+    <div class="check">
+      <input type="checkbox" id="useSitemap">
+      <label for="useSitemap" style="margin:0">Seed from sitemap</label>
+    </div>
+    <div class="hint" style="margin:-4px 0 8px 20px">
+      Crawls every URL a sitemap lists. Use this when a listing page builds its
+      links in JavaScript, so there is nothing for a crawler to follow.
+    </div>
+
+    <div id="sitemapFields" hidden>
+      <label>
+        <span class="label-text">Sitemap URL</span>
+        <input type="text" id="sitemapUrl" placeholder="https://site.com/sitemap.xml">
+      </label>
+      <label>
+        <span class="label-text">Keep URLs matching (optional regex)</span>
+        <input type="text" id="sitemapMatch" placeholder="/speakers/">
+      </label>
+    </div>
+
+    <label>
+      <span class="label-text">Extraction schema (JSON, optional)</span>
+      <textarea id="extractionSchema" rows="4" spellcheck="false"
+        placeholder='{"baseSelector":".card","fields":[{"name":"title","selector":"h3","type":"text"}]}'></textarea>
+    </label>
+    <div id="schemaStatus" class="hint"></div>
   </details>
 
   <div class="actions">

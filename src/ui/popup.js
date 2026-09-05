@@ -20,6 +20,10 @@ const FIELDS = {
   query: 'value',
   keywords: 'value',
   cssSelector: 'value',
+  sitemapUrl: 'value',
+  sitemapMatch: 'value',
+  extractionSchema: 'value',
+  useSitemap: 'checked',
   renderJs: 'checked',
   includeExternal: 'checked',
   excludeSocialMedia: 'checked',
@@ -31,6 +35,43 @@ let pollTimer = null;
 function syncConditionalFields() {
   $('queryRow').hidden = $('contentFilter').value !== 'bm25';
   $('keywordsRow').hidden = $('strategy').value !== 'best-first';
+  $('sitemapFields').hidden = !$('useSitemap').checked;
+}
+
+/**
+ * Parse the schema box, reporting problems as the user types.
+ *
+ * @returns {{schema: object|null, error: string|null}}
+ */
+function readSchema() {
+  const raw = $('extractionSchema').value.trim();
+  if (!raw) return { schema: null, error: null };
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return { schema: null, error: `Invalid JSON: ${e.message}` };
+  }
+  if (!parsed.baseSelector) return { schema: null, error: 'Schema needs a baseSelector' };
+  if (!Array.isArray(parsed.fields)) return { schema: null, error: 'Schema needs a fields array' };
+  return { schema: parsed, error: null };
+}
+
+/** Show schema validity under the textarea. */
+function validateSchemaField() {
+  const el = $('schemaStatus');
+  const raw = $('extractionSchema').value.trim();
+  if (!raw) { el.textContent = ''; el.className = 'hint'; return; }
+
+  const { schema, error } = readSchema();
+  if (error) {
+    el.textContent = error;
+    el.className = 'hint bad';
+  } else {
+    el.textContent = `Valid — ${schema.fields.length} field(s) per "${schema.baseSelector}"`;
+    el.className = 'hint good';
+  }
 }
 
 async function loadSettings() {
@@ -66,6 +107,10 @@ function buildConfig() {
     query: $('query').value.trim(),
     keywords: parseList($('keywords').value),
     cssSelector: $('cssSelector').value.trim(),
+    useSitemap: $('useSitemap').checked,
+    sitemapUrl: $('sitemapUrl').value.trim(),
+    sitemapMatch: $('sitemapMatch').value.trim(),
+    extractionSchema: readSchema().schema,
     renderJs: $('renderJs').checked,
     includeExternal: $('includeExternal').checked,
     excludeSocialMedia: $('excludeSocialMedia').checked,
@@ -148,6 +193,13 @@ $('start').addEventListener('click', async () => {
     return setStatus('That URL is not valid.', true);
   }
 
+  const { error: schemaError } = readSchema();
+  if (schemaError) return setStatus(schemaError, true);
+
+  if (config.useSitemap && !config.sitemapUrl) {
+    return setStatus('Enter a sitemap URL, or turn off sitemap seeding.', true);
+  }
+
   await saveSettings();
   setRunning(true);
   setStatus('Starting…');
@@ -170,10 +222,11 @@ $('view').addEventListener('click', () => {
   chrome.tabs.create({ url: chrome.runtime.getURL('src/ui/results.html') });
 });
 
-for (const id of ['contentFilter', 'strategy']) {
+for (const id of ['contentFilter', 'strategy', 'useSitemap']) {
   $(id).addEventListener('change', syncConditionalFields);
 }
+$('extractionSchema').addEventListener('input', validateSchemaField);
 
-loadSettings().then(refresh).then(() => {
+loadSettings().then(validateSchemaField).then(refresh).then(() => {
   if (!$('stop').disabled) startPolling();
 });

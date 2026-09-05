@@ -11,6 +11,7 @@ import { makeFetcher } from './core/crawl/fetcher.js';
 import { FilterChain, DomainFilter, ContentTypeFilter, URLPatternFilter } from './core/crawl/urlFilters.js';
 import { KeywordRelevanceScorer, FreshnessScorer, PathDepthScorer, CompositeScorer } from './core/crawl/scorers.js';
 import { DEFAULT_FILTER } from './core/filters/index.js';
+import { fetchSitemap } from './core/crawl/sitemap.js';
 
 const STATE_KEY = 'crawlState';
 const RESULTS_KEY = 'crawlResults';
@@ -141,6 +142,25 @@ async function startCrawl(config) {
     return { started: false, error: String(error?.message ?? error) };
   }
 
+  // Resolve the seed list. A sitemap seed matters for sites whose listing
+  // pages are client-rendered: those expose no links to follow, so link
+  // discovery finds nothing and only the sitemap has the full set of URLs.
+  let seeds = [config.url];
+  if (config.useSitemap) {
+    try {
+      seeds = await fetchSitemap(config.sitemapUrl || config.url, {
+        limit: config.maxPages ?? 50,
+        match: config.sitemapMatch ? new RegExp(config.sitemapMatch) : null,
+      });
+      if (!seeds.length) throw new Error('Sitemap listed no matching URLs');
+      await setState({ ...(await nowState()), seedCount: seeds.length });
+    } catch (error) {
+      await setState({ ...state, status: 'error', lastError: `Sitemap failed: ${error?.message ?? error}` });
+      running = null;
+      return { started: false, error: String(error?.message ?? error) };
+    }
+  }
+
   const fetcher = makeFetcher({
     mode: config.renderJs ? 'rendered' : 'raw',
     contentFilter: config.contentFilter ?? DEFAULT_FILTER,
@@ -168,7 +188,7 @@ async function startCrawl(config) {
   // Run detached: the popup may close, and the crawl must survive that.
   (async () => {
     try {
-      const stream = crawl(config.strategy ?? 'bfs', config.url, fetcher, {
+      const stream = crawl(config.strategy ?? 'bfs', seeds, fetcher, {
         maxDepth: config.maxDepth ?? 2,
         maxPages: config.maxPages ?? 50,
         includeExternal: config.includeExternal ?? false,
