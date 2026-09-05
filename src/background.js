@@ -365,6 +365,10 @@ async function startRecording() {
     finishedAt: Date.now(),
   });
 
+  // The popup closed the moment the user clicked the page, so it cannot show
+  // this. Open the results itself rather than leaving them wondering.
+  await chrome.tabs.create({ url: chrome.runtime.getURL('src/ui/results.html') });
+
   return { count: harvest.count, selector: harvest.selector, schema: harvest.schema };
 }
 

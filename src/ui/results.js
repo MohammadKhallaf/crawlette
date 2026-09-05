@@ -70,6 +70,8 @@ function renderList() {
     tr.append(urlCell, text('td', result.depth, 'num'), text('td', result.wordCount || 0, 'num'));
     tr.addEventListener('click', () => {
       selected = result;
+      activeTab = bestTabFor(result);
+      syncTabs();
       renderList();
       renderDetail();
     });
@@ -114,8 +116,33 @@ function detailNodes(result) {
   }
 
   if (activeTab === 'extracted') {
-    if (!result.extracted) return text('p', 'No extraction schema was applied.', 'empty');
-    return text('pre', JSON.stringify(result.extracted, null, 2));
+    const rows = result.extracted;
+    if (!rows || (Array.isArray(rows) && !rows.length)) {
+      return text('p', 'Nothing extracted for this page.', 'empty');
+    }
+    if (rows.error) return text('p', `Schema problem: ${rows.error}`, 'empty');
+
+    // Recorded items read far better as a table than as a wall of JSON.
+    if (Array.isArray(rows) && typeof rows[0] === 'object') {
+      const columns = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+      const table = document.createElement('table');
+
+      const head = document.createElement('tr');
+      for (const c of columns) head.appendChild(text('th', c));
+      table.appendChild(head);
+
+      for (const row of rows.slice(0, 500)) {
+        const tr = document.createElement('tr');
+        for (const c of columns) tr.appendChild(text('td', row[c] ?? ''));
+        table.appendChild(tr);
+      }
+
+      const wrap = document.createElement('div');
+      wrap.style.overflowX = 'auto';
+      wrap.append(text('p', `${rows.length} items`, 'empty'), table);
+      return wrap;
+    }
+    return text('pre', JSON.stringify(rows, null, 2));
   }
 
   if (activeTab === 'fitMarkdown') {
@@ -127,6 +154,22 @@ function detailNodes(result) {
 
   const body = result.markdown + (result.references ? `\n${result.references}` : '');
   return text('pre', body || '(empty)');
+}
+
+/** Pick the tab that actually has something in it for this result. */
+function bestTabFor(result) {
+  if (!result?.success) return activeTab;
+  if (!result.markdown && Array.isArray(result.extracted) && result.extracted.length) {
+    return 'extracted';
+  }
+  return activeTab;
+}
+
+/** Reflect the active tab in the tab strip. */
+function syncTabs() {
+  for (const button of document.querySelectorAll('.tabs button')) {
+    button.classList.toggle('active', button.dataset.tab === activeTab);
+  }
 }
 
 function renderDetail() {
@@ -189,7 +232,11 @@ $('exportMd').addEventListener('click', () => {
 });
 
 $('exportJson').addEventListener('click', () => {
-  download(JSON.stringify(results, null, 2), `crawlette-${stamp()}.json`, 'application/json');
+  // If every page carries extracted rows, export those flattened -- that is the
+  // shape worth pasting into a model, rather than the crawl bookkeeping.
+  const extracted = results.flatMap((r) => (Array.isArray(r.extracted) ? r.extracted : []));
+  const payload = extracted.length ? extracted : results;
+  download(JSON.stringify(payload, null, 2), `crawlette-${stamp()}.json`, 'application/json');
 });
 
 $('refresh').addEventListener('click', load);

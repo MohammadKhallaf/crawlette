@@ -55,6 +55,28 @@ function itemKey(el) {
   return `text:${(el.textContent || '').trim().slice(0, 160)}`;
 }
 
+/**
+ * Read the schema's fields from one live element.
+ *
+ * Done at collection time rather than afterwards: on a virtualised list the
+ * element may be destroyed moments later, and re-parsing stored HTML would lose
+ * anything that depended on the surrounding document.
+ */
+function readFields(el) {
+  const row = {};
+  for (const field of session.schema?.fields ?? []) {
+    try {
+      const target = field.selector ? el.querySelector(field.selector) : el;
+      if (!target) continue;
+      const value = field.type === 'attribute'
+        ? target.getAttribute(field.attribute)
+        : (target.textContent || '').trim();
+      if (value) row[field.name] = value;
+    } catch { /* a bad field must not stop the rest */ }
+  }
+  return row;
+}
+
 /** Capture everything currently matching, ignoring our own UI. */
 function collect() {
   if (!session.selector) return 0;
@@ -63,7 +85,10 @@ function collect() {
     if (el.closest(`#${HOST_ID}`)) continue;
     const key = itemKey(el);
     if (session.items.has(key)) continue;
-    session.items.set(key, { html: el.outerHTML, text: (el.textContent || '').trim() });
+    session.items.set(key, {
+      ...readFields(el),
+      text: (el.textContent || '').replace(/\s+/g, ' ').trim(),
+    });
     added += 1;
   }
   if (added) updateCount();
