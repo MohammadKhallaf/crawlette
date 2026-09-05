@@ -154,3 +154,75 @@ test('a broken schema is reported without failing the page', () => {
   assert.equal(r.success, true);
   assert.match(r.extracted.error, /baseSelector/);
 });
+
+/**
+ * Regression: MV3 service workers have no DOMParser. The first release parsed
+ * HTML inline and every crawl failed with "DOMParser is not defined" while all
+ * unit tests passed, because the Node harness always provides one.
+ */
+test('parsing is delegated when the context has no DOMParser', async () => {
+  const restoreFetch = stubFetch(PAGE);
+  const realParser = globalThis.DOMParser;
+  const realChrome = globalThis.chrome;
+
+  let delegated = null;
+  delete globalThis.DOMParser;
+  globalThis.chrome = {
+    runtime: {
+      sendMessage: async (message) => {
+        delegated = message;
+        // Stand in for the offscreen document, which does have a DOM.
+        globalThis.DOMParser = realParser;
+        try {
+          const { processHtml: real } = await import('../src/core/crawl/fetcher.js');
+          return { result: real(message.html, message.url, message.options) };
+        } finally {
+          delete globalThis.DOMParser;
+        }
+      },
+    },
+  };
+
+  try {
+    const r = await rawFetch(URL_);
+    assert.ok(delegated, 'expected the worker to delegate parsing');
+    assert.equal(delegated.type, 'offscreen:process');
+    assert.equal(r.success, true);
+    assert.match(r.markdown.rawMarkdown, /Heading/);
+  } finally {
+    globalThis.DOMParser = realParser;
+    globalThis.chrome = realChrome;
+    if (realChrome === undefined) delete globalThis.chrome;
+    restoreFetch();
+  }
+});
+
+test('options that cannot be cloned are stripped before messaging', async () => {
+  const restoreFetch = stubFetch(PAGE);
+  const realParser = globalThis.DOMParser;
+  const realChrome = globalThis.chrome;
+
+  let sent = null;
+  delete globalThis.DOMParser;
+  globalThis.chrome = {
+    runtime: {
+      sendMessage: async (message) => {
+        sent = message;
+        return { result: { url: message.url, success: true } };
+      },
+    },
+  };
+
+  try {
+    await rawFetch(URL_, { parser: () => {}, signal: new AbortController().signal, contentFilter: 'none' });
+    // A function or AbortSignal would throw a DataCloneError crossing the boundary.
+    assert.equal(sent.options.parser, undefined);
+    assert.equal(sent.options.signal, undefined);
+    assert.equal(sent.options.contentFilter, 'none');
+  } finally {
+    globalThis.DOMParser = realParser;
+    globalThis.chrome = realChrome;
+    if (realChrome === undefined) delete globalThis.chrome;
+    restoreFetch();
+  }
+});

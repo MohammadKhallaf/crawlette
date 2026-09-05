@@ -39,8 +39,9 @@ function ensureOffscreen() {
     try {
       await chrome.offscreen.createDocument({
         url: chrome.runtime.getURL('src/offscreen.html'),
-        reasons: ['DOM_PARSER'],
-        justification: 'Render pages so client-side JavaScript runs before extracting content.',
+        reasons: ['DOM_PARSER', 'IFRAME_SCRIPTING'],
+        justification: 'Parse fetched HTML and render pages so client-side scripts run; '
+          + 'service workers have no DOM.',
       });
     } catch (error) {
       // A concurrent call may have won the race; that is fine.
@@ -130,13 +131,14 @@ async function startCrawl(config) {
   running = { cancelled: false };
   const token = running;
 
-  if (config.renderJs) {
-    try {
-      await ensureOffscreen();
-    } catch (error) {
-      // Rendering is unavailable; the fetcher falls back to raw fetches.
-      await setState({ ...state, renderUnavailable: String(error?.message ?? error) });
-    }
+  // The offscreen document is required for EVERY crawl, not just rendered ones:
+  // service workers have no DOMParser, so all HTML parsing happens there.
+  try {
+    await ensureOffscreen();
+  } catch (error) {
+    await setState({ ...state, status: 'error', lastError: `Cannot start: ${error?.message ?? error}` });
+    running = null;
+    return { started: false, error: String(error?.message ?? error) };
   }
 
   const fetcher = makeFetcher({

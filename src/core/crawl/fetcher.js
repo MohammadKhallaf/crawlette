@@ -73,6 +73,36 @@ export function processHtml(html, url, options = {}) {
   };
 }
 
+/** True when this context can parse HTML itself (a window, not a worker). */
+export const hasLocalDom = () => typeof DOMParser !== 'undefined';
+
+/**
+ * Process HTML wherever a DOM exists.
+ *
+ * MV3 service workers have no DOMParser, so when called from the worker this
+ * hands the HTML to the offscreen document, which does have one. In a window
+ * context (or under test) it parses directly.
+ */
+async function processAnywhere(html, url, options, statusCode) {
+  if (hasLocalDom()) return processHtml(html, url, { ...options, statusCode });
+
+  const response = await chrome.runtime.sendMessage({
+    type: 'offscreen:process',
+    html,
+    url,
+    options: { ...serializableOptions(options), statusCode },
+  });
+  if (!response) throw new Error('No response from the offscreen document');
+  if (response.error) throw new Error(response.error);
+  return response.result;
+}
+
+/** Strip values that cannot survive structured cloning across a message. */
+function serializableOptions(options) {
+  const { parser, signal, ...rest } = options;
+  return rest;
+}
+
 /** Fetch a page over the network and process it. */
 export async function rawFetch(url, options = {}) {
   const { timeoutMs = DEFAULT_TIMEOUT_MS, signal } = options;
@@ -97,7 +127,7 @@ export async function rawFetch(url, options = {}) {
     }
 
     const html = await response.text();
-    const result = processHtml(html, response.url || url, { ...options, statusCode: response.status });
+    const result = await processAnywhere(html, response.url || url, options, response.status);
 
     if (!response.ok) {
       return { ...result, success: false, error: `HTTP ${response.status}` };
@@ -127,26 +157,27 @@ export async function renderedFetch(url, options = {}) {
   const { timeoutMs = DEFAULT_TIMEOUT_MS, settleMs = 500, removeOverlays = true } = options;
 
   try {
-    const html = await requestRender(url, { timeoutMs, settleMs, removeOverlays });
-    if (!html) return rawFetch(url, options);
-    return processHtml(html, url, options);
+    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
+      throw new Error('Rendering requires the extension runtime');
+    }
+    // The offscreen document both renders and processes: it owns the only DOM.
+    const response = await chrome.runtime.sendMessage({
+      type: 'offscreen:render',
+      url,
+      timeoutMs,
+      settleMs,
+      removeOverlays,
+      options: serializableOptions(options),
+    });
+    if (!response) throw new Error('No response from the offscreen document');
+    if (response.error) throw new Error(response.error);
+    return response.result;
   } catch (error) {
     // Rendering is best-effort; a raw fetch still yields useful content.
     const fallback = await rawFetch(url, options);
     if (fallback.success) fallback.renderFallback = String(error?.message ?? error);
     return fallback;
   }
-}
-
-/** Ask the offscreen document to render a URL. Defined here so it can be stubbed in tests. */
-async function requestRender(url, opts) {
-  if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
-    throw new Error('Rendering requires the extension runtime');
-  }
-  const response = await chrome.runtime.sendMessage({ type: 'render', url, ...opts });
-  if (!response) throw new Error('No response from the offscreen document');
-  if (response.error) throw new Error(response.error);
-  return response.html;
 }
 
 /**

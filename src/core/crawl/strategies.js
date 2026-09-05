@@ -143,6 +143,12 @@ export async function* bfsCrawl(startUrl, fetchPage, options = {}) {
   let currentLevel = opts.resumeState?.pending ?? [{ url: startUrl, parentUrl: null }];
   let pagesCrawled = opts.resumeState?.pagesCrawled ?? 0;
 
+  // DIVERGENCE FROM crawl4ai (bug fix): upstream's batch BFS seeds `visited`
+  // empty and only marks URLs as it discovers them, so the start URL is never
+  // marked. Any site whose pages link back to the entry point -- a logo in the
+  // header, a nav "Home" -- re-queues it and crawls it twice.
+  for (const entry of currentLevel) visited.add(entry.url);
+
   while (currentLevel.length) {
     if (pagesCrawled >= opts.maxPages) break;
     if (await opts.shouldCancel()) break;
