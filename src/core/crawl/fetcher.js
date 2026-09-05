@@ -181,14 +181,39 @@ export async function renderedFetch(url, options = {}) {
 }
 
 /**
+ * Load a page in a real tab, letting it scroll, click and ask for help.
+ *
+ * Use when content only appears after interaction: infinite scroll, a "load
+ * more" button, or a wall that a person has to clear. Slower than the other
+ * modes and strictly sequential, so reach for it when they are not enough.
+ */
+export async function interactiveFetch(url, options = {}) {
+  try {
+    const { harvestInTab } = await import('./tabFetcher.js');
+    const harvest = await harvestInTab(url, options);
+    const result = await processAnywhere(harvest.html, harvest.url || url, options, 200);
+    result.harvest = harvest.report;
+    // Items captured during scrolling; the final DOM may no longer hold them.
+    if (harvest.items?.length) result.harvestedItems = harvest.items;
+    return result;
+  } catch (error) {
+    const fallback = await rawFetch(url, options);
+    if (fallback.success) fallback.interactiveFallback = String(error?.message ?? error);
+    return fallback;
+  }
+}
+
+/**
  * Fetch a page in the requested mode.
  *
  * @param {string} url
- * @param {{mode?: 'raw'|'rendered'}} options
+ * @param {{mode?: 'raw'|'rendered'|'interactive'}} options
  */
 export function fetchPage(url, options = {}) {
   const { mode = 'raw' } = options;
-  return mode === 'rendered' ? renderedFetch(url, options) : rawFetch(url, options);
+  if (mode === 'interactive') return interactiveFetch(url, options);
+  if (mode === 'rendered') return renderedFetch(url, options);
+  return rawFetch(url, options);
 }
 
 /** Build a single-argument fetcher for the crawl strategies. */

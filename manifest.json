@@ -24,7 +24,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "src/ui/results.html"
+        "src/ui/results.html",
+        "src/content/harvest.js"
       ],
       "matches": [
         "<all_urls>"
