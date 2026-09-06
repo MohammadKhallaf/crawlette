@@ -115,6 +115,37 @@ The person at the keyboard has none of those problems.
 That last step is the point: the listing supplies the URLs *and* the shape, and
 the crawl fills in each detail page. No sitemap, no hand-written selectors.
 
+### Discovering an API worth calling directly
+
+While recording, requests the page itself makes are captured in its own
+JavaScript context -- the same technique DevTools' Network tab uses, done
+automatically. A listing that paginates almost always asks a server for the
+next batch, and that response is usually worth more than the DOM it renders:
+one call with a raised page size can return every record, often with fields
+the interface never shows, and none of the brittleness of matching selectors
+against a redesign.
+
+Crawlette does not call these APIs for you. **Its job is to hand you, or the
+LLM you hand the export to, a well-formed pointer to the real data source** --
+the same goal crawl4ai has, of producing something an LLM can act on -- not to
+build a bespoke client for every API it happens to see. So a captured call
+surfaces as:
+
+- the method and URL
+- how many records the response carried, and under which key
+- which of the URL's own query parameters look like pagination controls
+  (`page`, `cursor`, `offset`, `limit`, ...)
+- which response fields look like pagination metadata (`total`, `hasMore`,
+  `nextCursor`, ...)
+- a sample of the actual response body
+
+This is exported alongside the crawled data -- as a `discoveredApis` array in
+the JSON export, and a "Data APIs seen during recording" section in the
+markdown export -- so an LLM reading the file sees the shortcut without a
+human having to notice and copy it over. What to do with it (call it directly,
+raise a `limit` param, follow a `nextCursor`) is a decision for whoever
+receives that file, human or model.
+
 ### Sizing output for an LLM
 
 Prefer a schema over markdown when the goal is feeding a model. For the 390

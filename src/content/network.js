@@ -25,6 +25,12 @@
   /** Bodies above this are almost certainly assets, not data. */
   const MAX_BODY = 4_000_000;
 
+  /** Query/param names that usually control which page of results comes back. */
+  const PAGE_PARAMS = /^(page|p|offset|skip|start|cursor|after|before|per_page|perpage|limit|size|pagesize|page_size)$/i;
+
+  /** Response keys that usually describe how to get more. */
+  const PAGINATION_KEYS = /^(total|totalcount|total_count|totalitems|total_items|totalpages|total_pages|hasmore|has_more|hasnext|has_next|nextcursor|next_cursor|nextpage|next_page|next|cursor|offset|page|pagecount|page_count|links|pagination|meta)$/i;
+
   const store = { calls: [], enabled: true };
   window[KEY] = store;
 
@@ -52,6 +58,22 @@
       }
     }
 
+    // Surface enough for an LLM to construct the NEXT request itself, rather
+    // than a human having to read the sample and work it out: which of the
+    // URL's own query params look like pagination controls, and which
+    // top-level response keys look like pagination metadata (total, cursor,
+    // hasMore, ...). We report hints, not a guess at the actual next URL --
+    // APIs disagree too much about shape for that to be reliable.
+    let paginationParams = [];
+    try {
+      paginationParams = [...new URL(url, location.href).searchParams.keys()]
+        .filter((k) => PAGE_PARAMS.test(k));
+    } catch { /* a relative or malformed URL just yields no hints */ }
+
+    const paginationHints = !Array.isArray(parsed) && parsed && typeof parsed === 'object'
+      ? Object.keys(parsed).filter((k) => PAGINATION_KEYS.test(k))
+      : [];
+
     store.calls.push({
       url: String(url),
       method: method || 'GET',
@@ -59,6 +81,8 @@
       bytes: body.length,
       itemCount: best,
       itemKey: bestKey,
+      paginationParams,   // e.g. ["page", "per_page"] found in the URL's query string
+      paginationHints,    // e.g. ["total", "hasMore"] found in the response body
       // A small sample makes the endpoint recognisable without keeping it all.
       sample: trimmed.slice(0, 600),
       at: Date.now(),

@@ -7,6 +7,8 @@
  * into the extension's own origin.
  */
 
+import { apiCallsMarkdown, withDiscoveredApis } from '../core/exportFormat.js';
+
 const $ = (id) => document.getElementById(id);
 const send = (message) => chrome.runtime.sendMessage(message);
 
@@ -267,7 +269,7 @@ $('exportMd').addEventListener('click', () => {
     .filter((r) => r.success)
     .map((r) => `# ${r.title || r.url}\n\n<${r.url}>\n\n${r.markdown}\n`)
     .join('\n---\n\n');
-  download(doc, `crawlette-${stamp()}.md`, 'text/markdown');
+  download(doc + apiCallsMarkdown(apiCalls), `crawlette-${stamp()}.md`, 'text/markdown');
 });
 
 $('exportJson').addEventListener('click', () => {
@@ -275,7 +277,12 @@ $('exportJson').addEventListener('click', () => {
   // shape worth pasting into a model, rather than the crawl bookkeeping.
   const extracted = results.flatMap((r) => (Array.isArray(r.extracted) ? r.extracted : []));
   const payload = extracted.length ? extracted : results;
-  download(JSON.stringify(payload, null, 2), `crawlette-${stamp()}.json`, 'application/json');
+
+  // Discovered APIs travel alongside the data rather than only living in a UI
+  // tab, so an LLM given the export file can see "here is a shortcut" without
+  // a human having to notice and copy it over separately.
+  const withApis = withDiscoveredApis(payload, apiCalls);
+  download(JSON.stringify(withApis, null, 2), `crawlette-${stamp()}.json`, 'application/json');
 });
 
 $('refresh').addEventListener('click', load);
