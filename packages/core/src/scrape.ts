@@ -8,7 +8,7 @@
  */
 
 import {
-  normalizeUrl, getBaseDomain, isExternalUrl, isSocialMediaUrl, SOCIAL_MEDIA_DOMAINS,
+  normalizeUrl, getBaseDomain, isExternalUrl, isSocialMediaUrl, SOCIAL_MEDIA_DOMAINS, isDangerousUrl,
 } from './normalize.ts';
 
 /** Attributes crawl4ai keeps when stripping the rest (config.py:51). */
@@ -176,6 +176,10 @@ function imageUrlVariants(img: Element): SrcsetEntry[] {
   const out: SrcsetEntry[] = [];
   const push = (url: string | null, width: number | null = null) => {
     if (!url || url.startsWith('data:')) return;
+    // A dangerous scheme can arrive via any of the several attributes this
+    // function reads (data-src, a srcset entry, a same-page <source>), not
+    // only the primary `src` already checked by the caller.
+    if (isDangerousUrl(url)) return;
     if (!out.some((v) => v.url === url)) out.push({ url, width });
   };
 
@@ -190,7 +194,16 @@ function imageUrlVariants(img: Element): SrcsetEntry[] {
       for (const v of parseSrcset(source.getAttribute('srcset'))) push(v.url, v.width);
     }
   }
+  // Catches vendor-specific lazy-load attributes (data-lazy-src, data-original,
+  // ...) not covered above. Must skip the attributes ALREADY handled by name:
+  // srcset/data-srcset carry a multi-part "url widthw, url widthw" string, and
+  // that string frequently contains "http" (an absolute-URL srcset is the
+  // common case) -- without this exclusion, the whole descriptor string,
+  // width suffix included, was pushed as a second, malformed URL alongside
+  // the correctly parsed one.
+  const alreadyHandled = new Set(['src', 'data-src', 'srcset', 'data-srcset']);
   for (const { name, value } of Array.from(img.attributes)) {
+    if (alreadyHandled.has(name.toLowerCase())) continue;
     if (/src/i.test(name) && value.includes('http')) push(value);
   }
   return out;
@@ -224,11 +237,27 @@ function removeEmptyElements(root: Element): void {
   }
 }
 
-/** Strip every attribute except IMPORTANT_ATTRS (and data-* when requested). */
+/** href/src-bearing attribute names checked for a dangerous scheme, uniformly across every element. */
+const URL_ATTRS = new Set(['href', 'src']);
+
+/**
+ * Strip every attribute except IMPORTANT_ATTRS (and data-* when requested).
+ *
+ * This is also the final backstop against a dangerous URI scheme surviving
+ * into the serialized HTML: the targeted checks above cover `<a>`, `<img>`,
+ * `<video>`/`<audio>` specifically, but this walks every element regardless
+ * of tag, so an element type not explicitly enumerated elsewhere (`<area>`,
+ * a second `<base>`, ...) still gets its href/src validated here.
+ */
 function stripAttributes(root: Element, keepDataAttributes: boolean): void {
   for (const el of root.querySelectorAll('*')) {
-    for (const { name } of Array.from(el.attributes)) {
-      if (IMPORTANT_ATTRS.has(name)) continue;
+    for (const { name, value } of Array.from(el.attributes)) {
+      if (IMPORTANT_ATTRS.has(name)) {
+        if (URL_ATTRS.has(name) && isDangerousUrl(value, { allowDataImage: el.tagName === 'IMG' })) {
+          el.removeAttribute(name);
+        }
+        continue;
+      }
       if (keepDataAttributes && name.startsWith('data-')) continue;
       el.removeAttribute(name);
     }
@@ -294,6 +323,16 @@ export function scrape(doc: Document, url: string, options: ScrapeOptions = {}):
     const href = normalizeUrl(raw, resolveBase);
     if (!href) continue;
 
+    // A "cleaned" page is expected to be safe to render or link to elsewhere.
+    // `<a href="javascript:...">` survives tag-based cleaning entirely and
+    // executes in the clicking page's origin the moment any consumer renders
+    // it -- drop the whole anchor, matching how a blocked link is dropped
+    // below, rather than leave inert-looking but dangerous markup behind.
+    if (isDangerousUrl(href)) {
+      a.remove();
+      continue;
+    }
+
     const record: Link = {
       href,
       text: (a.textContent || '').trim(),
@@ -325,7 +364,8 @@ export function scrape(doc: Document, url: string, options: ScrapeOptions = {}):
     const absolute = src ? normalizeUrl(src, resolveBase) : null;
 
     if (absolute && (blockedDomains.has(getBaseDomain(absolute))
-      || (excludeExternalImages && isExternalUrl(absolute, baseDomain)))) {
+      || (excludeExternalImages && isExternalUrl(absolute, baseDomain))
+      || isDangerousUrl(absolute, { allowDataImage: true }))) {
       img.remove();
       return;
     }
@@ -357,10 +397,11 @@ export function scrape(doc: Document, url: string, options: ScrapeOptions = {}):
       const desc = closestUsefulText(el, imageDescriptionMinWordThreshold);
       const base = { alt: el.getAttribute('alt') || '', type: tag, desc };
       const src = el.getAttribute('src');
-      if (src) out.push({ ...base, src: normalizeUrl(src, resolveBase) || src });
+      if (src && !isDangerousUrl(src)) out.push({ ...base, src: normalizeUrl(src, resolveBase) || src });
       for (const source of el.querySelectorAll('source[src]')) {
         const s = source.getAttribute('src');
-        out.push({ ...base, src: (s && normalizeUrl(s, resolveBase)) || s || '' });
+        if (!s || isDangerousUrl(s)) continue;
+        out.push({ ...base, src: normalizeUrl(s, resolveBase) || s });
       }
     }
     return out;

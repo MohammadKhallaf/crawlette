@@ -242,3 +242,51 @@ test('handles a CDATA-wrapped <loc>', async () => {
     assert.deepEqual(urls, ['https://s.test/a?x=1&y=2']);
   } finally { restore(); }
 });
+
+/**
+ * fetchSitemap/discoverSitemap fetch whatever URL they are given. That was a
+ * non-issue in the one context this module originally shipped in -- a
+ * browser extension popup where the "attacker" would have to be the user
+ * typing into their own address bar. It stops being a non-issue as a
+ * general-purpose package: a server exposing "fetch the sitemap for this
+ * URL" as a public endpoint, fed user input, is a textbook SSRF proxy
+ * otherwise. The fix does not attempt to block private IP ranges (that needs
+ * DNS-level control this module cannot exercise soundly) -- it closes what a
+ * library reasonably can: refuse non-http(s) schemes outright.
+ */
+test('fetchSitemap rejects non-http(s) schemes', async () => {
+  const restore = stubFetch({});
+  try {
+    await assert.rejects(() => fetchSitemap('file:///etc/passwd'), /only http\(s\) URLs/);
+    await assert.rejects(() => fetchSitemap('javascript:alert(1)'), /only http\(s\) URLs/);
+    await assert.rejects(() => fetchSitemap('ftp://example.com/x'), /only http\(s\) URLs/);
+  } finally { restore(); }
+});
+
+test('fetchSitemap rejects a data: URI rather than resolving it locally', async () => {
+  // Some fetch implementations resolve data: URIs with no network request at
+  // all, letting a caller inject fabricated "sitemap" content while bypassing
+  // the assumption that a real remote resource is being fetched.
+  const restore = stubFetch({});
+  try {
+    await assert.rejects(
+      () => fetchSitemap('data:text/xml,<urlset><url><loc>http://evil.test/x</loc></url></urlset>'),
+      /only http\(s\) URLs/,
+    );
+  } finally { restore(); }
+});
+
+test('fetchSitemap still rejects an unparseable URL clearly', async () => {
+  const restore = stubFetch({});
+  try {
+    await assert.rejects(() => fetchSitemap('not a url'), /not a valid URL/);
+  } finally { restore(); }
+});
+
+test('discoverSitemap degrades to null on a non-http(s) pageUrl rather than throwing', async () => {
+  const restore = stubFetch({});
+  try {
+    assert.equal(await discoverSitemap('javascript:alert(1)'), null);
+    assert.equal(await discoverSitemap('data:text/html,x'), null);
+  } finally { restore(); }
+});

@@ -20,7 +20,58 @@
  * the sitemaps.org spec requires: a sitemap may only list URLs on its own host
  * unless cross-submission has been verified. Credentials can then only ever
  * reach the origin the user typed themselves.
+ *
+ * That same-origin recursion guard protects the CHILDREN of a sitemap index.
+ * It says nothing about the ENTRY POINT: `fetchSitemap(url)`/
+ * `discoverSitemap(pageUrl)` fetch whatever URL they are handed, full stop.
+ * That was a non-issue for the one place this module originally shipped in --
+ * a browser extension popup where the "attacker" would have to be the user
+ * typing a URL into their own address bar, which is not a real threat model.
+ *
+ * It stops being a non-issue the moment this becomes a general-purpose
+ * package. A server that exposes "fetch me the sitemap for this URL" as a
+ * public endpoint and passes user input straight to `fetchSitemap` has built
+ * a textbook SSRF proxy: `http://169.254.169.254/latest/meta-data/...`
+ * (cloud instance credentials), `http://localhost:6379` (an internal cache),
+ * any address the SERVER can reach but the public cannot.
+ *
+ * `entrypointSchemeGuard` below closes what a library reasonably CAN close --
+ * non-http(s) schemes, including `data:` URIs (which some `fetch`
+ * implementations resolve locally with no network request at all, letting a
+ * caller inject fabricated "sitemap" content while bypassing this module's
+ * assumption that it is fetching a real resource). It deliberately does NOT
+ * attempt to block private/internal IP ranges: doing that soundly requires
+ * resolving DNS and inspecting the resolved address (not the hostname, which
+ * DNS rebinding can present as anything), handling redirects to a different
+ * host after the check has already passed, and reasoning about IPv6 and
+ * decimal/octal IP encoding tricks -- a partial version of that would be
+ * worse than no version, since it invites treating "passed the check" as
+ * "safe" when it is not. If you expose these functions to URLs an untrusted
+ * party can influence, apply your own network-egress controls (an allowlist,
+ * a sandboxed fetch proxy, DNS-pinning) the same way you would for any raw
+ * fetch()/axios/got call -- this module cannot see or enforce your trust
+ * boundary from inside a browser or a Node process.
  */
+
+const ALLOWED_SITEMAP_SCHEMES = new Set(['http:', 'https:']);
+
+/**
+ * Reject anything that is not an http(s) URL, with a clear error rather than
+ * relying on the underlying fetch implementation's incidental behavior (which
+ * differs: Node's fetch already throws on `file:`/`ftp:`, but resolves `data:`
+ * URIs locally with no request at all).
+ */
+function entrypointSchemeGuard(url: string, label: string): void {
+  let scheme: string;
+  try {
+    scheme = new URL(url).protocol;
+  } catch {
+    throw new Error(`${label}: not a valid URL: ${url}`);
+  }
+  if (!ALLOWED_SITEMAP_SCHEMES.has(scheme)) {
+    throw new Error(`${label}: only http(s) URLs are supported, got "${scheme}" (${url})`);
+  }
+}
 
 import { XMLParser } from 'fast-xml-parser';
 
@@ -80,6 +131,10 @@ export interface FetchSitemapOptions {
  */
 export async function fetchSitemap(url: string, options: FetchSitemapOptions = {}): Promise<string[]> {
   const { limit = Infinity, match = null, _depth = 0 } = options;
+
+  // Recursive child sitemaps are already scheme-checked inside
+  // isSameOriginSitemap; this guards the entry point, which is not.
+  entrypointSchemeGuard(url, 'fetchSitemap');
 
   const response = await fetch(url, { credentials: 'include' });
   if (!response.ok) throw new Error(`Sitemap fetch failed: HTTP ${response.status}`);
@@ -158,6 +213,7 @@ export async function discoverSitemap(pageUrl: string): Promise<string | null> {
   let origin: string;
   try {
     ({ origin } = new URL(pageUrl));
+    entrypointSchemeGuard(pageUrl, 'discoverSitemap');
   } catch {
     return null;
   }

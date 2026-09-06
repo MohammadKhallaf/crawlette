@@ -128,6 +128,36 @@ export function isExternalUrl(url: string, baseDomain: string): boolean {
   return !(domain === base || domain.endsWith(`.${base}`));
 }
 
+/** URI schemes that execute code, or can, if a browser ever navigates to them. */
+const EXECUTABLE_SCHEMES = ['javascript:', 'vbscript:'];
+
+export interface IsDangerousUrlOptions {
+  /** Allow `data:image/...` -- the one data: use this pipeline treats as legitimate. */
+  allowDataImage?: boolean;
+}
+
+/**
+ * True when `url` is unsafe to place in `href`/`src` and later render.
+ *
+ * A page-cleaning pipeline exists to make output safe to hand to something
+ * else -- a markdown renderer, a UI, another crawl. `<a href="javascript:...">`
+ * survives HTML "cleaning" that only removes `<script>` tags, and still
+ * executes in the clicking page's origin the moment a consumer renders that
+ * link. `data:` is scoped to image sources only, since `data:text/html,...`
+ * on an `<a href>` can execute arbitrary markup on navigation.
+ *
+ * Checked after stripping tab/newline/CR: the URL living standard strips
+ * these from a URL before its scheme is parsed, so a browser treats
+ * "jav\tascript:alert(1)" identically to "javascript:alert(1)" -- a bare
+ * `.startsWith()` on the raw string misses this class of bypass.
+ */
+export function isDangerousUrl(url: string, { allowDataImage = false }: IsDangerousUrlOptions = {}): boolean {
+  const cleaned = String(url).replace(/[\t\n\r]/g, '').trim().toLowerCase();
+  if (EXECUTABLE_SCHEMES.some((s) => cleaned.startsWith(s))) return true;
+  if (cleaned.startsWith('data:')) return !(allowDataImage && /^data:image\//.test(cleaned));
+  return false;
+}
+
 /** True if `url` belongs to one of the well-known social platforms. */
 export function isSocialMediaUrl(url: string, domains: string[] = SOCIAL_MEDIA_DOMAINS): boolean {
   let host: string;

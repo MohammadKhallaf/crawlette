@@ -115,3 +115,73 @@ test('onlyText unwraps inline formatting tags', () => {
   assert.ok(!r.cleanedHtml.includes('<strong>'));
   assert.match(r.cleanedHtml, /bold/);
 });
+
+/**
+ * A "cleaned" page is expected to be safe to render or link to elsewhere.
+ * `<a href="javascript:...">` survived tag-based cleaning entirely -- no
+ * <script> tag is involved -- and executed in the clicking page's origin the
+ * moment any consumer rendered the resulting HTML or the structured link.
+ */
+test('drops a javascript: href entirely, from html and from links', () => {
+  const r = scrape(doc('<a href="javascript:alert(document.cookie)">click</a><p>filler content here</p>'), URL_);
+  assert.ok(!r.cleanedHtml.includes('javascript:'));
+  assert.equal(r.links.internal.length + r.links.external.length, 0);
+});
+
+test('catches a whitespace-obfuscated javascript: href', () => {
+  // Browsers strip tab/newline/CR from a URL before parsing its scheme, so
+  // "jav\tascript:" still executes on click -- a naive prefix check would miss it.
+  const r = scrape(doc('<a href="jav	ascript:alert(1)">click</a>'), URL_);
+  assert.ok(!r.cleanedHtml.toLowerCase().includes('javascript:'));
+});
+
+test('drops a javascript: src from img, video and audio', () => {
+  const r = scrape(doc(
+    '<img src="javascript:alert(1)" alt="a photo of something" width="900" height="900" srcset="/x.jpg 9w">'
+    + '<video src="javascript:alert(2)"></video>'
+    + '<audio src="javascript:alert(3)"></audio>',
+  ), URL_);
+  assert.ok(!r.cleanedHtml.includes('javascript:'));
+  assert.equal(r.media.images.length, 0);
+  assert.equal(r.media.videos.length, 0);
+  assert.equal(r.media.audios.length, 0);
+});
+
+test('drops a data:text/html href but keeps a legitimate http link', () => {
+  const r = scrape(doc(
+    '<a href="data:text/html,<script>alert(1)</script>">bad</a>'
+    + '<a href="https://example.com/safe">good</a>',
+  ), URL_);
+  assert.ok(!r.cleanedHtml.includes('data:text/html'));
+  assert.match(r.cleanedHtml, /https:\/\/example\.com\/safe/);
+});
+
+test('keeps a normal http link and a normal image untouched', () => {
+  // A single srcset URL, matching src, so this is unambiguously "one image"
+  // rather than exercising the (correct, separately-tested) one-entry-per-
+  // distinct-URL-variant behavior for a differing srcset.
+  const r = scrape(doc(
+    '<a href="https://example.com/x">go</a>'
+    + '<img src="https://example.com/photo.jpg" alt="a real photo here" width="900" height="900" srcset="https://example.com/photo.jpg 900w">',
+  ), URL_);
+  assert.equal(r.links.internal.length + r.links.external.length, 1);
+  assert.equal(r.media.images.length, 1);
+  assert.equal(r.media.images[0].src, 'https://example.com/photo.jpg');
+});
+
+/**
+ * Regression: an absolute-URL srcset (the common case for CDN-served images)
+ * contains "http" in its raw attribute value, and the catch-all lazy-load
+ * loop matched any attribute NAME containing "src" without excluding srcset
+ * itself -- double-processing it as a second, malformed candidate: the whole
+ * "url widthw" descriptor string, width suffix and all, treated as one URL.
+ */
+test('an absolute-URL srcset is not double-counted as a second, malformed variant', () => {
+  const r = scrape(doc(
+    '<img src="https://example.com/photo.jpg" alt="a real photo here" width="900" height="900" '
+    + 'srcset="https://example.com/photo.jpg 900w">',
+  ), URL_);
+  assert.equal(r.media.images.length, 1);
+  assert.equal(r.media.images[0].src, 'https://example.com/photo.jpg');
+  assert.ok(!r.media.images.some((i) => i.src.includes('%20') || i.src.includes('900w')));
+});

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  normalizeUrl, getBaseDomain, isExternalUrl, isSocialMediaUrl,
+  normalizeUrl, getBaseDomain, isExternalUrl, isSocialMediaUrl, isDangerousUrl,
 } from '../src/normalize.ts';
 
 const BASE = 'https://example.com/docs/guide';
@@ -89,4 +89,38 @@ test('getBaseDomain falls back to the bare host for non-registrable hosts', () =
   assert.equal(getBaseDomain('http://localhost:3000/x'), 'localhost');
   assert.equal(getBaseDomain('http://192.168.1.1/x'), '192.168.1.1');
   assert.equal(getBaseDomain('http://intranet/x'), 'intranet');
+});
+
+/**
+ * A "cleaned" page is expected to be safe to render or link to elsewhere.
+ * `<a href="javascript:...">` survives tag-based HTML cleaning entirely
+ * (script tags are removed, but this is not a <script> tag) and executes in
+ * the clicking page's origin the moment any consumer renders that link.
+ */
+test('isDangerousUrl rejects javascript: and vbscript: schemes', () => {
+  assert.equal(isDangerousUrl('javascript:alert(1)'), true);
+  assert.equal(isDangerousUrl('JAVASCRIPT:alert(1)'), true);
+  assert.equal(isDangerousUrl('vbscript:msgbox(1)'), true);
+});
+
+test('isDangerousUrl catches whitespace/control-character obfuscation', () => {
+  // The URL living standard strips tab/newline/CR from a URL before parsing
+  // its scheme, so a browser treats these identically to the plain form --
+  // a bare .startsWith() on the raw string would miss all three.
+  assert.equal(isDangerousUrl('jav\tascript:alert(1)'), true);
+  assert.equal(isDangerousUrl('jav\nascript:alert(1)'), true);
+  assert.equal(isDangerousUrl('  javascript:alert(1)'), true);
+});
+
+test('isDangerousUrl rejects data: except data:image with the opt-in', () => {
+  assert.equal(isDangerousUrl('data:text/html,<script>alert(1)</script>'), true);
+  assert.equal(isDangerousUrl('data:image/png;base64,abc'), true, 'rejected by default');
+  assert.equal(isDangerousUrl('data:image/png;base64,abc', { allowDataImage: true }), false);
+  assert.equal(isDangerousUrl('data:text/html,x', { allowDataImage: true }), true, 'the carve-out is image-only');
+});
+
+test('isDangerousUrl accepts ordinary URLs', () => {
+  for (const url of ['https://example.com/a', 'http://example.com', '/relative', 'mailto:a@b.com', 'tel:+123']) {
+    assert.equal(isDangerousUrl(url), false, `${url} should be accepted`);
+  }
 });

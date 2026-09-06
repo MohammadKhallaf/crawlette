@@ -72,6 +72,31 @@ const seeds = await fetchSitemap(sitemapUrl, { match: new RegExp(deriveMatchFrom
 for await (const result of bfsCrawl(seeds, fetchPage, { maxDepth: 0, maxPages: seeds.length })) { /* ... */ }
 ```
 
+## Security notes for embedders
+
+This package assumes it runs somewhere the *user themselves* chose the URL —
+a browser, a script you run yourself. Two consequences follow if you build a
+service on top of it, especially one that accepts a URL from someone else:
+
+- **`scrape()`/`processHtml()` neutralize dangerous URI schemes** (`javascript:`,
+  `vbscript:`, `data:` outside `<img>`) in every `href`/`src` they emit, in
+  both the cleaned HTML and the structured `links`/`media` output — a
+  `javascript:` URI surviving "cleaned" output and later being rendered
+  (`innerHTML`, or reused as a link) executes in whatever page renders it.
+  This is on by default and cannot be disabled.
+- **`fetchSitemap()`/`discoverSitemap()` only refuse non-http(s) schemes** —
+  that's the one thing a library can close soundly. They do **not** block
+  requests to internal or private addresses (`http://169.254.169.254`,
+  `http://localhost:6379`, an internal service mesh host). Soundly blocking
+  those requires resolving DNS and checking the *resolved* address rather
+  than the hostname (DNS rebinding defeats a hostname check), handling
+  redirects to a different host after the check has passed, and reasoning
+  about IPv6/decimal-IP encoding tricks — a partial version of that is worse
+  than none, since it invites treating "passed" as "safe" when it isn't. If
+  you expose either function to a URL an untrusted party can influence,
+  apply your own network-egress controls, the same way you would for any raw
+  `fetch()`/`axios`/`got` call.
+
 ## Divergences from crawl4ai
 
 Faithful where crawl4ai is strong (deep-crawl traversal, URL normalization, the extraction schema format, the result shape), and deliberately different in a few documented places — see the [main repository's README](https://github.com/MohammadKhallaf/crawlette#divergences-from-crawl4ai) for the full list and reasoning. In short:
