@@ -205,6 +205,26 @@ export function pathSelector(el, root = el.ownerDocument) {
  * Saves the user hand-writing selectors for the obvious pieces: a heading, a
  * link, an image. They can prune what they do not want.
  */
+/**
+ * A generic ("logo", "photo", "avatar"...) alt text is not a name and should
+ * not be offered as one -- but "Tom Brady" or "Amanda Rothbard" should.
+ */
+const GENERIC_ALT_WORD = /^(logo|icon|photo|image|picture|avatar|banner|background|thumbnail|placeholder)s?$/i;
+
+/**
+ * Does this alt text look like a person's or item's name, rather than
+ * boilerplate? Checked word-by-word rather than against the whole string --
+ * "Company icon" and "Background image" are two-word phrases where only one
+ * word is decorative, so a whole-string check let both slip through.
+ */
+function looksLikeAName(alt) {
+  const text = (alt || '').trim();
+  if (!text || text.length > 60) return false;
+  const words = text.split(/\s+/);
+  if (words.length < 2 || words.length > 6) return false;
+  return !words.some((w) => GENERIC_ALT_WORD.test(w));
+}
+
 export function suggestFields(el) {
   const fields = [];
   const seen = new Set();
@@ -226,6 +246,15 @@ export function suggestFields(el) {
 
   const img = el.querySelector('img[src]');
   if (img) add('image', 'img', 'attribute', 'src');
+
+  // Card layouts skip a heading tag entirely and rely on a photo's alt text to
+  // name what's shown -- a headshot's alt is very often literally the person's
+  // name. Found from a real capture where a card with no h1-h4 and no
+  // title/name-classed element left every row without any name field at all,
+  // even though the photo's alt attribute had it the whole time.
+  if (!heading && img && looksLikeAName(img.getAttribute('alt'))) {
+    add('title', 'img', 'attribute', 'alt');
+  }
 
   // A paragraph that is not the heading is usually the description or role.
   const para = el.querySelector('p');

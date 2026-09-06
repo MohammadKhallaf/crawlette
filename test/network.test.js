@@ -119,3 +119,83 @@ test('does not re-patch fetch if the module is already installed', async () => {
   await import(`../src/content/network.js?t=${Math.random()}`);
   assert.equal(globalThis.__crawletteNet, first);
 });
+
+/**
+ * Regression, built from a real capture on unbound.hubspot.com/speakers.
+ *
+ * The "biggest array wins" rule picked `all_tags` (81 plain tag strings) over
+ * `speakers` (20 rich objects: name, job_title, company, images, sessions) --
+ * exactly backwards, since `speakers` is the actual paginated record the user
+ * was recording and `all_tags` is a filter taxonomy that just happens to be
+ * longer. An LLM reading `itemKey: "all_tags"` would look in the wrong place
+ * entirely for the data it was told this endpoint returns.
+ */
+test('prefers a rich record array over a longer flat array (real HubSpot shape)', async () => {
+  const { store, queue } = await loadNetworkModule();
+
+  const speaker = (i) => ({
+    id: `id-${i}`,
+    slug: `speaker-${i}`,
+    name: `Speaker ${i}`,
+    profile_image: [{ url: `https://cdn.test/${i}.png` }],
+    featured_speaker_image: [],
+    featured_speaker_logo: [],
+    job_title: 'Community Lead',
+    company: 'Gamma',
+    featured: false,
+    featured_order: null,
+    bio: 'A short bio for this speaker.',
+    sessions: [],
+  });
+
+  const body = JSON.stringify({
+    total: 334,
+    pages: 17,
+    current_page: '2',
+    per_page: '20',
+    offset: 20,
+    speakers: Array.from({ length: 20 }, (_, i) => speaker(i)),
+    all_tags: Array.from({ length: 81 }, (_, i) => `tag-${i}`),
+  });
+
+  await fetchWith(queue, body, 'https://unbound.hubspot.com/api/v2/speakers?year=2026&page=2&per_page=20');
+
+  const call = store.calls.at(-1);
+  assert.equal(call.itemKey, 'speakers', `expected "speakers", got "${call.itemKey}"`);
+  assert.equal(call.itemCount, 20);
+});
+
+test('catches the pagination keys a real API actually used (pages, per_page, current_page)', async () => {
+  const { store, queue } = await loadNetworkModule();
+  const body = JSON.stringify({
+    total: 334, pages: 17, current_page: '2', per_page: '20', offset: 20, speakers: [{ id: 1 }],
+  });
+  await fetchWith(queue, body, 'https://unbound.hubspot.com/api/v2/speakers?page=2&per_page=20');
+
+  const call = store.calls.at(-1);
+  for (const key of ['total', 'pages', 'current_page', 'per_page', 'offset']) {
+    assert.ok(call.paginationHints.includes(key), `expected paginationHints to include "${key}", got ${JSON.stringify(call.paginationHints)}`);
+  }
+});
+
+test('a short flat array still wins when nothing richer exists', async () => {
+  const { store, queue } = await loadNetworkModule();
+  const body = JSON.stringify({ tags: ['a', 'b', 'c'] });
+  await fetchWith(queue, body, 'https://site.test/api/tags');
+  const call = store.calls.at(-1);
+  assert.equal(call.itemKey, 'tags');
+  assert.equal(call.itemCount, 3);
+});
+
+test('an array of near-empty objects does not beat a smaller array of rich ones', async () => {
+  const { store, queue } = await loadNetworkModule();
+  const body = JSON.stringify({
+    ids: Array.from({ length: 50 }, (_, i) => ({ id: i })),          // 50 objects, 1 key each
+    records: Array.from({ length: 10 }, (_, i) => ({                  // 10 objects, 6 keys each
+      id: i, name: `N${i}`, email: 'x', role: 'y', active: true, tag: 'z',
+    })),
+  });
+  await fetchWith(queue, body, 'https://site.test/api/mixed');
+  const call = store.calls.at(-1);
+  assert.equal(call.itemKey, 'records', `expected "records" (richer) over "ids" (longer), got "${call.itemKey}"`);
+});

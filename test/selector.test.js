@@ -222,3 +222,58 @@ test('expands through wrappers that share the item count', () => {
   assert.equal(result.selector, 'div.card');
   assert.equal(result.count, 3);
 });
+
+/**
+ * Regression, built from a real capture on unbound.hubspot.com/speakers.
+ *
+ * The "Featured" grid cards on that listing have no h1-h4 and no
+ * title/name-classed element -- the person's name never appeared, in any
+ * form, in the exported rows; only a "description" (their role) did. This is
+ * a real, common card shape: a headshot whose alt text is the name, and a
+ * single paragraph for the role, with nothing marked up as a heading at all.
+ */
+test('suggestFields falls back to a headshot\'s alt text when there is no heading', () => {
+  const doc = page(`
+    <div class="featured-card">
+      <img src="/tom-brady.png" alt="Tom Brady">
+      <p class="role">Seven-Time Super Bowl Champion</p>
+    </div>`);
+  const fields = suggestFields(doc.querySelector('.featured-card'));
+  const title = fields.find((f) => f.name === 'title');
+  assert.ok(title, 'expected a title field to be suggested');
+  assert.equal(title.type, 'attribute');
+  assert.equal(title.attribute, 'alt');
+});
+
+test('an explicit heading is still preferred over alt-text guessing', () => {
+  const doc = page(`
+    <div class="card">
+      <img src="/x.png" alt="Ada Lovelace">
+      <h3 class="name">Ada Lovelace</h3>
+    </div>`);
+  const fields = suggestFields(doc.querySelector('.card'));
+  const title = fields.find((f) => f.name === 'title');
+  assert.equal(title.type, 'text', 'a real heading should win over the alt fallback');
+});
+
+test('generic alt text (logo, icon, photo) is never offered as a name', () => {
+  for (const alt of ['Logo', 'Company icon', 'photo', 'Background image']) {
+    const doc = page(`<div class="card"><img src="/x.png" alt="${alt}"><p>Some role</p></div>`);
+    const fields = suggestFields(doc.querySelector('.card'));
+    assert.ok(!fields.some((f) => f.name === 'title'), `"${alt}" should not be treated as a name`);
+  }
+});
+
+test('the alt-fallback schema extracts the name Crawlette actually missed', async () => {
+  const doc = page(`
+    <div class="featured-card">
+      <img src="/tom-brady.png" alt="Tom Brady">
+      <p class="role">Seven-Time Super Bowl Champion</p>
+      <a href="/speakers/tom-brady">go</a>
+    </div>`);
+  const built = buildSchema(doc.querySelector('.featured-card'), doc);
+  const { extractJsonCss } = await import('../src/core/extract/jsonCss.js');
+  const row = extractJsonCss(doc, built.schema)[0];
+  assert.equal(row.title, 'Tom Brady');
+  assert.equal(row.description, 'Seven-Time Super Bowl Champion');
+});

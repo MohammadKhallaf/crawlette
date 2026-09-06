@@ -28,8 +28,15 @@
   /** Query/param names that usually control which page of results comes back. */
   const PAGE_PARAMS = /^(page|p|offset|skip|start|cursor|after|before|per_page|perpage|limit|size|pagesize|page_size)$/i;
 
-  /** Response keys that usually describe how to get more. */
-  const PAGINATION_KEYS = /^(total|totalcount|total_count|totalitems|total_items|totalpages|total_pages|hasmore|has_more|hasnext|has_next|nextcursor|next_cursor|nextpage|next_page|next|cursor|offset|page|pagecount|page_count|links|pagination|meta)$/i;
+  /**
+   * Response keys that usually describe how to get more.
+   *
+   * Grown from a real capture: a HubSpot listing's paginated response used
+   * `pages`, `per_page` and `current_page` at the top level, none of which the
+   * first version of this list caught -- it only recognised the *_pages and
+   * page_count spellings, not the bare "pages" HubSpot actually used.
+   */
+  const PAGINATION_KEYS = /^(total|totalcount|total_count|totalitems|total_items|totalpages|total_pages|pages|pagecount|page_count|page|currentpage|current_page|perpage|per_page|pagesize|page_size|hasmore|has_more|hasnext|has_next|nextcursor|next_cursor|nextpage|next_page|next|cursor|offset|links|pagination|meta)$/i;
 
   const store = { calls: [], enabled: true };
   window[KEY] = store;
@@ -48,13 +55,32 @@
       return;
     }
 
-    // How many records did it carry? The biggest array anywhere in the payload
-    // is a good proxy, since APIs bury lists under keys like data/items/results.
-    let best = Array.isArray(parsed) ? parsed.length : 0;
+    // Which array is the actual record list? Length alone is not enough: a
+    // real capture returned `speakers` (20 rich objects, one page of the
+    // record the user was recording) alongside `all_tags` (81 short strings, a
+    // filter taxonomy) -- the plain "longest array" rule picked the tag list
+    // and reported it as the data, which is actively wrong to hand an LLM.
+    // Score by length * richness instead, where richness rewards arrays of
+    // objects with many fields (real records) over arrays of primitives or
+    // near-empty objects (ids, tags, enum values).
+    const richness = (arr) => {
+      const sample = arr.slice(0, 5).filter((item) => item && typeof item === 'object' && !Array.isArray(item));
+      if (!sample.length) return 0.25; // primitives, or an array of arrays
+      const avgKeys = sample.reduce((sum, item) => sum + Object.keys(item).length, 0) / sample.length;
+      return Math.max(avgKeys, 0.25);
+    };
+
+    let best = 0;
     let bestKey = Array.isArray(parsed) ? '' : null;
-    if (!Array.isArray(parsed) && parsed && typeof parsed === 'object') {
+    let bestScore = 0;
+    if (Array.isArray(parsed)) {
+      best = parsed.length;
+      bestScore = best * richness(parsed);
+    } else if (parsed && typeof parsed === 'object') {
       for (const [k, v] of Object.entries(parsed)) {
-        if (Array.isArray(v) && v.length > best) { best = v.length; bestKey = k; }
+        if (!Array.isArray(v) || !v.length) continue;
+        const score = v.length * richness(v);
+        if (score > bestScore) { bestScore = score; best = v.length; bestKey = k; }
       }
     }
 
