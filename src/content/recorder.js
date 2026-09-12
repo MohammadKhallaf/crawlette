@@ -46,12 +46,24 @@ const session = {
   onDone: null,
 };
 
-/** Identity that survives DOM recycling and re-renders. */
+/**
+ * Identity that survives DOM recycling and re-renders.
+ *
+ * Found on a real page (a conference exhibitor listing): its sidebar filter
+ * widget assigns a FRESH random hash to each control's href fragment on every
+ * re-render -- "#filter_body_side_field_4_03885bfba7a4..." one capture,
+ * "...01a7a8a4f475..." the next, same visible label both times. Trusting that
+ * href for identity made 10 filter labels look "new" a second time, so they
+ * were recorded twice under different keys. A same-page fragment link
+ * (`#...`) is a navigation aid, not a stable identifier -- unlike a real
+ * cross-page href, which the same page's actual exhibitor cards used
+ * correctly with no duplication, so only the fragment case is untrusted here.
+ */
 function itemKey(el) {
   const id = el.id || el.getAttribute('data-id') || el.getAttribute('data-key');
   if (id) return `id:${id}`;
   const href = el.querySelector('a[href]')?.getAttribute('href');
-  if (href) return `href:${href}`;
+  if (href && !href.startsWith('#')) return `href:${href}`;
   return `text:${(el.textContent || '').trim().slice(0, 160)}`;
 }
 

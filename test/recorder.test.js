@@ -28,6 +28,34 @@ test('itemKey is stable across re-renders', () => {
 });
 
 /**
+ * Regression, found on a real conference exhibitor listing recorded via Pick
+ * & record: a sidebar filter widget assigns a FRESH random hash to each
+ * control's href fragment on every re-render ("#filter_body_side_field_4_
+ * 03885bfba7a4..." one capture, "...01a7a8a4f475..." the next), same visible
+ * label both times. Trusting that href for identity made 10 filter labels
+ * look "new" a second time and get recorded twice under different keys.
+ */
+test('a same-page fragment href is not trusted for identity (only its text)', () => {
+  const first = installPage(
+    '<div class="filter"><a href="#filter_body_side_field_4_03885bfba7a41bb96aa06cf27675fe15">Product Categories</a></div>',
+  );
+  const second = installPage(
+    '<div class="filter"><a href="#filter_body_side_field_4_01a7a8a4f475611aaf27e8c6de4417af">Product Categories</a></div>',
+  );
+  const keyA = itemKey(first.querySelector('.filter'));
+  const keyB = itemKey(second.querySelector('.filter'));
+  assert.equal(keyA, keyB, 'the same visible label must key identically despite the churning fragment id');
+  assert.equal(keyA, 'text:Product Categories');
+});
+
+test('a real cross-page href is still trusted for identity', () => {
+  // The same page's actual exhibitor cards used stable, real links and were
+  // never duplicated -- only same-page fragment anchors are untrusted.
+  const doc = installPage('<div class="card"><a href="https://events.example.com/map?id=4037">Aalto Scientific</a></div>');
+  assert.equal(itemKey(doc.querySelector('.card')), 'href:https://events.example.com/map?id=4037');
+});
+
+/**
  * The heart of record mode: the user paginates, content is replaced, and
  * everything seen along the way must still be there at the end.
  */
